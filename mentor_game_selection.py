@@ -259,29 +259,45 @@ class MentorGameSelection:
             # Get weekend dates
             weekend_dates = self._get_weekend_dates()
             weekend_dates = self._organizeDatesIntoWeekends(weekend_dates)
-
+            # weekend_dates example:
+            # [
+            #   ['Friday, January 9, 2026', 'Saturday, January 10, 2026'],
+            #   ['Friday, January 16, 2026', 'Saturday, January 17, 2026'],
+            #   ['Friday, January 23, 2026', 'Saturday, January 24, 2026'],
+            #   ['Friday, January 30, 2026', 'Saturday, January 31, 2026'],
+            #   ['Friday, February 6, 2026', 'Saturday, February 7, 2026'],
+            #   ['Friday, February 13, 2026', 'Saturday, February 14, 2026'],
+            #   ['Saturday, February 21, 2026']
+            # ]
             # weekend_dates is a list of lists of date strings
             # each list is a weekend
             # each date string is in the format 'Friday, December 20, 2025'
             # we need to get the three dates from all_match_data that are closest to the current date
 
             # Get the three dates from weekend_dates that are closest to (and after) the current date
-            current_date = datetime.now().date()
+            currentDate = datetime.now().date()
 
-            # Parse all dates and calculate their distance from current_date
-            def date_distance(date_str):
-                """Calculate absolute days difference from current date"""
-                parsed_date = datetime.strptime(date_str, '%A, %B %d, %Y').date()
-                return abs((parsed_date - current_date).days)
+            def indexOfClosestDate(groups: list[list[str]]) -> int:
+                fmt = "%A, %B %d, %Y"
 
-            # Sort by distance and take the 3 closest dates
-            thisWeekendDates = sorted(
-                self.all_match_data.keys(),
-                key=date_distance
-            )[:3]
+                # Build a list of (group_index, parsed_date) pairs for all dates
+                allDates = []
+                for i, group in enumerate(groups):
+                    for s in group:
+                        d = datetime.strptime(s, fmt).date()
+                        allDates.append((i, d))
+
+                # Find the (group_index, date) with minimal absolute difference to today
+                closestGroupIndex, _ = min(
+                    allDates,
+                    key=lambda t: abs(t[1] - currentDate)
+                )
+                return closestGroupIndex
+
+            thisWeekendDates = weekend_dates[indexOfClosestDate(weekend_dates)]
 
             # print(f"thisWeekendDates: {thisWeekendDates}")
-            # thisWeekendDates: ['Friday, January 9, 2026', 'Saturday, January 10, 2026', 'Friday, January 16, 2026']
+            # thisWeekendDates: ['Friday, January 9, 2026', 'Saturday, January 10, 2026']
 
             if not thisWeekendDates:
                 ui.label('No weekend games found.').classes('text-gray-500 mt-4')
@@ -293,7 +309,7 @@ class MentorGameSelection:
             # sunday_dates = [d for d in weekend_dates if d.startswith('Sunday')]
 
             for date in thisWeekendDates:
-                ui.label(f'{date[0]}').classes('text-lg font-bold mt-4 mb-2')
+                # ui.label(f'{date[0]}').classes('text-lg font-bold mt-4 mb-2')
                 self._render_day_section(date, self.all_match_data[date])
 
 
