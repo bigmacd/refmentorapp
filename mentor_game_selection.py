@@ -280,7 +280,8 @@ class MentorGameSelection:
                 key=date_distance
             )[:3]
 
-            print(f"thisWeekendDates: {thisWeekendDates}")
+            # print(f"thisWeekendDates: {thisWeekendDates}")
+            # thisWeekendDates: ['Friday, January 9, 2026', 'Saturday, January 10, 2026', 'Friday, January 16, 2026']
 
             if not thisWeekendDates:
                 ui.label('No weekend games found.').classes('text-gray-500 mt-4')
@@ -291,28 +292,8 @@ class MentorGameSelection:
             # saturday_dates = [d for d in weekend_dates if d.startswith('Saturday')]
             # sunday_dates = [d for d in weekend_dates if d.startswith('Sunday')]
 
-            for dates in thisWeekendDates:
-                ui.label(f'Weekend of {dates[0]}').classes('text-lg font-bold mt-4 mb-2')
-                for dateStr in dates:
-                    if dateStr in self.all_match_data:
-                        self._render_day_section(dateStr, self.all_match_data[dateStr])
+            for date in thisWeekendDates:
+                ui.label(f'{date[0]}').classes('text-lg font-bold mt-4 mb-2')
+                self._render_day_section(date, self.all_match_data[date])
 
 
-            # # Render sections for each day type
-            # if friday_dates:
-            #     ui.label('Friday Games').classes('text-lg font-bold mt-4 mb-2')
-            #     for date_str in friday_dates:
-            #         if date_str in self.all_match_data:
-            #             self._render_day_section(date_str, self.all_match_data[date_str])
-
-            # if saturday_dates:
-            #     ui.label('Saturday Games').classes('text-lg font-bold mt-4 mb-2')
-            #     for date_str in saturday_dates:
-            #         if date_str in self.all_match_data:
-            #             self._render_day_section(date_str, self.all_match_data[date_str])
-
-            # if sunday_dates:
-            #     ui.label('Sunday Games').classes('text-lg font-bold mt-4 mb-2')
-            #     for date_str in sunday_dates:
-            #         if date_str in self.all_match_data:
-            #             self._render_day_section(date_str, self.all_match_data[date_str])
