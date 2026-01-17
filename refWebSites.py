@@ -30,6 +30,7 @@ class MySoccerLeague(RefereeWebSite):
 
     def __init__(self, br):
         super(MySoccerLeague, self).__init__(br)
+        self._browser.session.verify = "./mslChain.pem"
         self._baseUrl = self._loginPage = "https://mysoccerleague.com/YSLmobile.jsp"
         self._loginFormInput = { 'userName': os.environ['mslUsername'],
                                 'password': os.environ['mslPassword'] }
