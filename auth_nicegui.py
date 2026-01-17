@@ -133,7 +133,7 @@ class AuthManager:
 
         try:
             token = self.generate_reset_token()
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=4)
 
             self.db.createPasswordResetToken(user['id'], token, expires_at)
 
