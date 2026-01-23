@@ -849,7 +849,7 @@ class RefereeDbCockroach(object):
           SELECT prt.id, prt.user_id, prt.token, prt.expires_at, prt.used, u.email, u.username
           FROM password_reset_tokens prt
           JOIN users u ON prt.user_id = u.id
-          WHERE prt.token = %s AND prt.used = FALSE AND prt.expires_at > NOW() AND u.email = %s
+          WHERE prt.token = %s AND prt.used = FALSE AND prt.expires_at > (NOW() AT TIME ZONE 'UTC')::TIMESTAMP AND LOWER(u.email) = LOWER(%s)
         '''
 
         self.executeSql(sql, (token, current_email))
@@ -869,7 +869,7 @@ class RefereeDbCockroach(object):
 
     def getUsernameByResetToken(self, token: str) -> str:
         """Get username associated with a valid password reset token"""
-        sql = "select u.email from password_reset_tokens prt JOIN users u on prt.user_id = u.id where prt.token = %s and prt.used = false and prt.expires_at < NOW()"
+        sql = "select u.email from password_reset_tokens prt JOIN users u on prt.user_id = u.id where prt.token = %s and prt.used = false and prt.expires_at > (NOW() AT TIME ZONE 'UTC')::TIMESTAMP"
         self.executeSql(sql, (token,))
         row = self.cursor.fetchone()
         if row:

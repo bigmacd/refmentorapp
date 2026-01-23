@@ -81,13 +81,15 @@ def getRiskyRefs() -> list:
     return retVal
 
 
-def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list) -> None:
+def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list) -> dict:
 
     minimizeOutput = os.environ.get('MINIMIZE_OUTPUT', 'false').lower() == 'true'
 
     current = {}
     for c in sorted(currentu):
         current[c] = currentu[c]
+
+    retVal = {}
 
     for field, details in current.items():
         fieldsOnce = False
@@ -141,6 +143,27 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
             age = details[game]['age']
             level = details[game]['level']
 
+            # looking to return this data as well as "print"
+            if field not in retVal:
+                retVal[field] = {}
+
+            if game not in retVal[field]:
+                retVal[field][game] = {}
+
+            retVal[field][game]['center'] = center
+            retVal[field][game]['ar1'] = ar1
+            retVal[field][game]['ar2'] = ar2
+            retVal[field][game]['date'] = date
+            retVal[field][game]['gameTime'] = gameTime
+            retVal[field][game]['age'] = age
+            retVal[field][game]['level'] = level
+            retVal[field][game]['cmarker'] = cmarker
+            retVal[field][game]['a1marker'] = a1marker
+            retVal[field][game]['a2marker'] = a2marker
+            retVal[field][game]['crisky'] = crisky
+            retVal[field][game]['a1risky'] = a1risky
+            retVal[field][game]['a2risky'] = a2risky
+
             print(f'\tID: {game}, Date: {date}, Time: {gameTime}, Age: {age}, Level: {level}')
 
             if center in newRefs:
@@ -156,6 +179,8 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
     print("** Referee has already had a mentor")
     print("## Referee has been flagged as needing additional help")
     print("")
+
+    return retVal
 
 
 class WorkloadGenerator:
@@ -242,9 +267,9 @@ class WorkloadGenerator:
             # (firstname, lastname) to list of strings "firstname lastname"
             newRefs = adjustDbNewRefs(newRefs)
 
-            generateWorkload(current, newRefs, mentored, risky)
+            resultsFromRun = generateWorkload(current, newRefs, mentored, risky)
 
-        return stdout_capture.getvalue()
+        return stdout_capture.getvalue(), resultsFromRun
 
     def get_workload_output(self, force_refresh: bool = False) -> str:
         """
@@ -265,7 +290,7 @@ class WorkloadGenerator:
             self._is_generating = True
             try:
                 logger.info("Generating workload data...")
-                self._output = self._generate_workload_data()
+                self._output, self.resultsFromRun = self._generate_workload_data()
                 logger.info("Workload data generated successfully")
             except Exception as e:
                 logger.error(f"Error generating workload data: {e}", exc_info=True)
@@ -282,7 +307,7 @@ class WorkloadGenerator:
 
 
 # Convenience function for backward compatibility
-def run() -> None:
+def run() -> dict:
     """
     Generate workload data and print to stdout.
     Maintains backward compatibility with existing code.
@@ -290,7 +315,7 @@ def run() -> None:
     generator = WorkloadGenerator()
     output = generator.get_workload_output()
     print(output, end='')
-
+    return generator.resultsFromRun
 
 def getEmails():
     try:
@@ -326,4 +351,4 @@ if __name__ == "__main__":
                 continue
             print(email)
     else:
-        run()
+        _ = run()

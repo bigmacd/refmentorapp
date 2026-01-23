@@ -849,7 +849,7 @@ def render_workload_tab():
                 # Capture stdout from the run() function
                 stdout_capture = StringIO()
                 with redirect_stdout(stdout_capture):
-                    run()
+                    ui.resultsFromRun = run()
                 output = stdout_capture.getvalue()
                 workload_result['output'] = output if output else 'No workload data available'
                 workload_result['loading'] = False
