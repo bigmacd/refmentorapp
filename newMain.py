@@ -273,8 +273,14 @@ class AppState:
         self.loaded = False
         self._loading = False
         self._load_lock = threading.Lock()
+        # Initialize workload data storage
+        self.workload_output = None
+        self.workload_error = None
+        self.workload_loading = False
+        self._workload_lock = threading.Lock()
         # Don't block on initialization - start loading in background
         self._start_background_load()
+        self._start_background_workload_load()
 
     def _start_background_load(self):
         """Start loading data in a background thread without blocking"""
@@ -312,6 +318,43 @@ class AppState:
         result = self.loaded and self.all_match_data is not None
         logger.debug(f"is_data_loaded: {result} (loaded={self.loaded}, data_is_none={self.all_match_data is None}, data_len={len(self.all_match_data) if self.all_match_data else 0})")
         return result
+
+    def _start_background_workload_load(self):
+        """Start loading workload data in a background thread without blocking"""
+        def load_workload_in_background():
+            try:
+                logger.info("Starting background workload data load...")
+                self.load_workload_data()
+                logger.info("Background workload data load completed")
+            except Exception as e:
+                logger.error(f"Error in background workload data load: {e}", exc_info=True)
+
+        thread = threading.Thread(target=load_workload_in_background, daemon=True)
+        thread.start()
+
+    def load_workload_data(self):
+        """Load workload data, with thread-safe check to avoid duplicate loads"""
+        with self._workload_lock:
+            # Initialize ui.resultsFromRun if not already set
+            if not hasattr(ui, 'resultsFromRun') or ui.resultsFromRun is None:
+                if not self.workload_loading:
+                    self.workload_loading = True
+                    try:
+                        logger.info("Loading workload data from run()...")
+                        # Capture stdout from the run() function
+                        stdout_capture = StringIO()
+                        with redirect_stdout(stdout_capture):
+                            ui.resultsFromRun = run()
+                        self.workload_output = stdout_capture.getvalue()
+                        if not self.workload_output:
+                            self.workload_output = 'No workload data available'
+                        logger.info("Successfully loaded workload data")
+                    except Exception as e:
+                        logger.error(f"Failed to load workload data: {e}", exc_info=True)
+                        self.workload_error = str(e)
+                        raise
+                    finally:
+                        self.workload_loading = False
 
     def is_loading(self) -> bool:
         """Check if data is currently being loaded"""
@@ -839,45 +882,41 @@ def render_workload_tab():
 
         output_area = ui.code('Loading workload data...').classes('w-full')
 
-        # Thread-safe storage for workload data
-        workload_result = {'output': None, 'error': None, 'loading': True}
-
-        def load_workload_in_background():
-            """Load workload data in a background thread"""
-            try:
-                logger.info("Starting workload data load in background thread...")
-                # Capture stdout from the run() function
-                stdout_capture = StringIO()
-                with redirect_stdout(stdout_capture):
-                    ui.resultsFromRun = run()
-                output = stdout_capture.getvalue()
-                workload_result['output'] = output if output else 'No workload data available'
-                workload_result['loading'] = False
-                logger.info("Workload data loaded successfully")
-            except Exception as e:
-                logger.error(f"Error loading workload: {e}", exc_info=True)
-                workload_result['error'] = str(e)
-                workload_result['loading'] = False
-
         def check_workload_status():
             """Check if workload loading is complete and update UI"""
-            if not workload_result['loading']:
+            if not state.workload_loading:
                 # Loading is complete, update UI
-                if workload_result['error']:
-                    output_area.content = f'Error loading workload: {workload_result["error"]}'
+                if state.workload_error:
+                    output_area.content = f'Error loading workload: {state.workload_error}'
+                elif state.workload_output:
+                    output_area.content = state.workload_output
+                elif ui.resultsFromRun:
+                    # Data is available but output wasn't captured, show success message
+                    output_area.content = 'Workload data loaded successfully.'
                 else:
-                    output_area.content = workload_result['output']
+                    output_area.content = 'No workload data available'
                 # Timer will stop automatically since we don't reschedule
             else:
                 # Still loading, check again in 0.5 seconds
                 ui.timer(0.5, check_workload_status, once=True)
 
-        # Start loading in background thread
-        thread = threading.Thread(target=load_workload_in_background, daemon=True)
-        thread.start()
-
-        # Start polling for completion (will reschedule itself until loading is done)
-        ui.timer(0.5, check_workload_status, once=True)
+        # Check if already loaded
+        if not state.workload_loading:
+            if state.workload_error:
+                output_area.content = f'Error loading workload: {state.workload_error}'
+            elif state.workload_output:
+                output_area.content = state.workload_output
+            elif hasattr(ui, 'resultsFromRun') and ui.resultsFromRun:
+                output_area.content = 'Workload data loaded successfully.'
+            else:
+                # Data not loaded yet, start loading if not already started
+                if not hasattr(ui, 'resultsFromRun') or ui.resultsFromRun is None:
+                    state.load_workload_data()
+                # Start polling for completion
+                ui.timer(0.5, check_workload_status, once=True)
+        else:
+            # Still loading, start polling
+            ui.timer(0.5, check_workload_status, once=True)
 
 
 
