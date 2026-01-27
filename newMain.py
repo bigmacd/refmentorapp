@@ -221,7 +221,10 @@ def main_page():
 
     # Initialize tab components
     calendar_tab = CalendarTab(state.db, state.auth_manager, logger)
-    game_selection_tab = MentorGameSelection(state.db, state.auth_manager, state.all_match_data, state.dates, logger)
+    game_selection_tab = MentorGameSelection(
+        state.db, state.auth_manager, state.all_match_data, state.dates, logger,
+        get_match_data=lambda: (state.all_match_data, state.dates)
+    )
 
     with content:
         with ui.tab_panel(tab_report):
@@ -238,15 +241,28 @@ def main_page():
 
 def render_mentor_report_tab():
     """Render the mentor report entry form"""
-
-    # Check if data is loaded
-    if state.all_match_data is None:
-        with ui.card().classes('form-container w-full'):
+    card = ui.card().classes('form-container w-full')
+    if not state.is_data_loaded():
+        with card:
             with ui.column().classes('items-center justify-center p-8'):
                 ui.spinner(size='lg')
                 ui.label('Loading data...').classes('mt-4 text-gray-600')
+                ui.label('Checking every few seconds. Data will appear when ready.').classes('text-sm text-gray-500 mt-2')
+        def check_loaded():
+            if state.is_data_loaded():
+                card.clear()
+                _build_mentor_report_form(card)
+            else:
+                if not state.is_loading():
+                    state._start_background_load()
+                ui.timer(0.5, check_loaded, once=True)
+        ui.timer(0.5, check_loaded, once=True)
         return
+    _build_mentor_report_form(card)
 
+
+def _build_mentor_report_form(container):
+    """Build the mentor report form inside the given container."""
     # Form state
     form_state = {
         'mentor': None,
@@ -263,7 +279,7 @@ def render_mentor_report_tab():
         'current_match': None
     }
 
-    with ui.card().classes('form-container w-full'):
+    with container:
         ui.label('Enter a Mentor Report').classes('text-xl font-bold mb-4')
 
         # Mentor selection
