@@ -110,6 +110,10 @@ class MentorGameSelection:
 
     def _render_day_section(self, date_str, games_by_venue):
         """Render games for a specific day"""
+
+        # only use selections from games_by_venue if that game is in the data
+        # from the run (ui.resultsFromRun)
+
         selections = self._get_game_selections_for_date(date_str)
 
         with ui.expansion(date_str, icon='event').classes('w-full mb-4'):
@@ -287,11 +291,21 @@ class MentorGameSelection:
                         d = datetime.strptime(s, fmt).date()
                         allDates.append((i, d))
 
-                # Find the (group_index, date) with minimal absolute difference to today
-                closestGroupIndex, _ = min(
-                    allDates,
-                    key=lambda t: abs(t[1] - currentDate)
-                )
+                # Filter to only future dates (including today)
+                futureDates = [(i, d) for i, d in allDates if d >= currentDate]
+
+                if not futureDates:
+                    # If no future dates, fall back to closest overall
+                    closestGroupIndex, _ = min(
+                        allDates,
+                        key=lambda t: abs(t[1] - currentDate)
+                    )
+                else:
+                    # Find the (group_index, date) with minimal difference to today among future dates
+                    closestGroupIndex, _ = min(
+                        futureDates,
+                        key=lambda t: t[1] - currentDate
+                    )
                 return closestGroupIndex
 
             thisWeekendDates = weekend_dates[indexOfClosestDate(weekend_dates)]
@@ -303,13 +317,113 @@ class MentorGameSelection:
                 ui.label('No weekend games found.').classes('text-gray-500 mt-4')
                 return
 
-            # Group dates by day of week
-            # friday_dates = [d for d in weekend_dates if d.startswith('Friday')]
-            # saturday_dates = [d for d in weekend_dates if d.startswith('Saturday')]
-            # sunday_dates = [d for d in weekend_dates if d.startswith('Sunday')]
+            def extractNewRefRecords(date: str) -> dict:
+                """
+                The run data (ui.resultsFromRun) has the new referee information, similar
+                to the data we see in the Mentor Workload email.
+                That data is in this format:
+                {
+                    "field": {
+                        "gameId": {
+                            "center": "name",
+                            "ar1": "name",
+                            "ar2": "name"
+                            <truncated>
+                        }
+                    }
+                }
+                However, the UI for mentors to select games is in this format:
+                {
+                    "field": [
+                        {
+                            "Center": "name",
+                            "AR1": "name",
+                            "AR2": "name"
+                            <truncated>
+                        },
+                        {
+                            "Center": "name",
+                            "AR1": "name",
+                            "AR2": "name"
+                            <truncated>
+                        }
+                    ]
+                }
+                So we need to extract just the fields and games from self.all_match_data
+                that are in ui.resultsFromRun and add the markers and risky information
+                to the data in self.all_match_data.
+                """
+                newRefRecords = {}
 
+                def convertDate(date: str) -> str:
+                    return datetime.strptime(date, "%A, %B %d, %Y").strftime("%m/%d/%Y")
+
+                def findGame(gameId: str, field: str) -> dict:
+                    for game in self.all_match_data[date][field]:
+                        if game['GameID'] == gameId:
+                            return game
+                    return None
+
+                dateToMatch = convertDate(date)
+
+                for field in ui.resultsFromRun.keys():
+                    if field not in newRefRecords:
+                        newRefRecords[field] = []
+
+                    for gameId, game in ui.resultsFromRun[field].items():
+                        if game['date'] == dateToMatch:
+                            allDataGame = findGame(gameId, field)
+                            if allDataGame is not None:
+                                allDataGame['Center'] += f" {game['cmarker']} {game['crisky']}"
+                                allDataGame['AR1'] += f" {game['a1marker']} {game['a1risky']}"
+                                allDataGame['AR2'] += f" {game['a2marker']} {game['a2risky']}"
+                                newRefRecords[field].append(allDataGame)
+
+                    # Clean up any fields with no games
+                    # Empty lists would cause empty sections/expansions in the UI
+                    # Which really messes up the rendering
+                    if len(newRefRecords[field]) == 0:
+                        del newRefRecords[field]
+
+                return newRefRecords
+
+            # Check if resultsFromRun is available
+            if not hasattr(ui, 'resultsFromRun') or not ui.resultsFromRun:
+                # Show loading state and poll for data
+                loading_container = ui.column().classes('items-center justify-center p-8')
+                with loading_container:
+                    ui.spinner(size='lg')
+                    ui.label('Loading workload data...').classes('mt-4 text-gray-600')
+                    ui.label('Please wait while the workload data is being generated.').classes('text-sm text-gray-500 mt-2')
+
+                def check_results_ready():
+                    """Check if resultsFromRun is ready and render content"""
+                    if hasattr(ui, 'resultsFromRun') and ui.resultsFromRun:
+                        # Data is ready, clear loading and render content
+                        loading_container.clear()
+                        loading_container.classes('w-full')  # Update classes for content rendering
+                        with loading_container:
+                            render_game_selection_content()
+                    else:
+                        # Still loading, check again in 0.5 seconds
+                        ui.timer(0.5, check_results_ready, once=True)
+
+                def render_game_selection_content():
+                    """Render the actual game selection content once data is ready"""
+
+                    for date in thisWeekendDates:
+                        newRefRecords = extractNewRefRecords(date)
+                        if newRefRecords is None or len(newRefRecords) == 0:
+                            continue
+                        self._render_day_section(date, newRefRecords)
+
+                # Start polling for data
+                ui.timer(0.5, check_results_ready, once=True)
+                return
+
+            # Data is already available, render immediately
             for date in thisWeekendDates:
-                # ui.label(f'{date[0]}').classes('text-lg font-bold mt-4 mb-2')
-                self._render_day_section(date, self.all_match_data[date])
-
-
+                newRefRecords = extractNewRefRecords(date)
+                if newRefRecords is None or len(newRefRecords) == 0:
+                    continue
+                self._render_day_section(date, newRefRecords)
