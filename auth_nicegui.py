@@ -51,20 +51,29 @@ class AuthManager:
         password_hash, _ = self.hash_password(password, salt)
         return hmac.compare_digest(password_hash, hashed_password)
 
-    def authenticate_user(self, username: str, password: str) -> bool:
-        """Authenticate a user with username and password"""
+    def authenticate_user(self, username: str, password: str, organization_id: Optional[int] = None) -> bool:
+        """Authenticate a user with username and password. If organization_id is given, user must belong to that organization."""
         user = self.db.getUserByUsername(username)
-        if user and self.verify_password(password, user['password_hash'], user['salt']):
-            # Store in app storage
-            app.storage.user['authenticated'] = True
-            app.storage.user['username'] = username
-            app.storage.user['user_role'] = user['role']
-            app.storage.user['user_id'] = user['id']
-            app.storage.user['email'] = user['email']
+        if not user or not self.verify_password(password, user['password_hash'], user['salt']):
+            return False
+        if organization_id is not None and not self.db.userBelongsToOrganization(user['id'], organization_id):
+            return False
+        # Store in app storage
+        app.storage.user['authenticated'] = True
+        app.storage.user['username'] = username
+        app.storage.user['user_role'] = user['role']
+        app.storage.user['user_id'] = user['id']
+        app.storage.user['email'] = user['email']
+        app.storage.user['organization_id'] = organization_id
+        if organization_id is not None:
+            orgs = self.db.getOrganizations()
+            org = next((o for o in orgs if o['id'] == organization_id), None)
+            app.storage.user['organization_name'] = org['name'] if org else None
+        else:
+            app.storage.user['organization_name'] = None
 
-            self.db.updateLastLogin(username)
-            return True
-        return False
+        self.db.updateLastLogin(username)
+        return True
 
     def logout(self):
         """Logout the current user"""
@@ -83,6 +92,18 @@ class AuthManager:
         """Get the current user's role"""
         return app.storage.user.get('user_role')
 
+    def get_current_organization_id(self) -> Optional[int]:
+        """Get the current user's organization id (multi-tenant)"""
+        return app.storage.user.get('organization_id')
+
+    def get_current_organization_name(self) -> Optional[str]:
+        """Get the current user's organization name (multi-tenant)"""
+        return app.storage.user.get('organization_name')
+
+    def get_organizations(self) -> list:
+        """Get all organizations for the login dropdown (multi-tenant)"""
+        return self.db.getOrganizations()
+
     def is_admin(self) -> bool:
         """Check if current user is an admin"""
         return app.storage.user.get('user_role') == 'admin'
@@ -99,6 +120,11 @@ class AuthManager:
 
         try:
             self.db.createUser(username, password_hash, salt, email, role)
+            user = self.db.getUserByUsername(username)
+            if user:
+                default_org = next((o for o in self.db.getOrganizations() if (o.get('slug') == 'default' or o.get('name') == 'Default')), None)
+                if default_org:
+                    self.db.addUserToOrganization(user['id'], default_org['id'])
             return True, "User created successfully"
         except Exception as e:
             return False, f"Error creating user: {str(e)}"
@@ -247,6 +273,14 @@ def login_page():
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold text-center w-full mb-2')
         ui.label('Please log in to continue').classes('text-gray-600 text-center w-full mb-6')
 
+        orgs = auth_manager.get_organizations()
+        # NiceGUI select: dict keys = stored value, dict values = display label
+        org_options = {o['id']: o['name'] for o in orgs}
+        organization_select = ui.select(
+            options=org_options,
+            label='Organization',
+            value=list(org_options.keys())[0] if org_options else None,
+        ).classes('w-full')
         username_input = ui.input('Username', placeholder='Enter your username').classes('w-full')
         password_input = ui.input('Password', placeholder='Enter your password', password=True).classes('w-full')
 
@@ -259,6 +293,8 @@ def login_page():
                     ui.label('Please enter both username and password').classes('text-red-500')
                 return
 
+            org_id = organization_select.value if organization_select.value is not None else None
+
             # Get request from NiceGUI context when login happens
             request = None
             try:
@@ -268,7 +304,7 @@ def login_page():
             except Exception as e:
                 logging.debug(f"Could not get request from context: {e}")
 
-            if auth_manager.authenticate_user(username_input.value, password_input.value):
+            if auth_manager.authenticate_user(username_input.value, password_input.value, organization_id=org_id):
                 auth_manager.log_current_user(request)
                 ip_info = request.client.host if request and request.client else 'unknown'
                 logging.info(f"User {username_input.value} logged in from IP {ip_info}, navigating to /")
@@ -277,7 +313,7 @@ def login_page():
                 ui.navigate.to('/')
             else:
                 with message_area:
-                    ui.label('Invalid username or password').classes('text-red-500')
+                    ui.label('Invalid username, password, or you do not have access to the selected organization.').classes('text-red-500')
 
         ui.button('Login', on_click=do_login).classes('w-full mt-4').props('color=primary')
 

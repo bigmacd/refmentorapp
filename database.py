@@ -38,6 +38,14 @@ class RefereeDbCockroach(object):
             if not self.cursor.fetchone()[0] == 1:
                 self._createUsersTable()
 
+            self.executeSql(" SELECT count(table_name) FROM information_schema.tables WHERE table_schema LIKE 'public' AND table_type LIKE 'BASE TABLE' AND table_name='organizations'")
+            if not self.cursor.fetchone()[0] == 1:
+                self._createOrganizationsTable()
+
+            self.executeSql(" SELECT count(table_name) FROM information_schema.tables WHERE table_schema LIKE 'public' AND table_type LIKE 'BASE TABLE' AND table_name='user_organizations'")
+            if not self.cursor.fetchone()[0] == 1:
+                self._createUserOrganizationsTable()
+
             self.executeSql(" SELECT count(table_name) FROM information_schema.tables WHERE table_schema LIKE 'public' AND table_type LIKE 'BASE TABLE' AND table_name='password_reset_tokens'")
             if not self.cursor.fetchone()[0] == 1:
                 self._createPasswordResetTokensTable()
@@ -218,6 +226,20 @@ class RefereeDbCockroach(object):
                                      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                                      last_login TIMESTAMP)"""
         self.executeSql(sql)
+
+    def _createOrganizationsTable(self):
+        sql = """CREATE TABLE organizations (id SERIAL PRIMARY KEY,
+                                            name TEXT NOT NULL UNIQUE,
+                                            slug TEXT,
+                                            created_at TIMESTAMP NOT NULL DEFAULT NOW())"""
+        self.executeSql(sql)
+
+    def _createUserOrganizationsTable(self):
+        sql = """CREATE TABLE user_organizations (user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                                                 organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                                                 PRIMARY KEY (user_id, organization_id))"""
+        self.executeSql(sql)
+        self.connection.commit()
 
 
     def _createPasswordResetTokensTable(self):
@@ -790,6 +812,30 @@ class RefereeDbCockroach(object):
             })
         return users
 
+    def getOrganizations(self) -> list:
+        """Get all organizations for multi-tenant login"""
+        sql = "SELECT id, name, slug FROM organizations ORDER BY name"
+        self.executeSql(sql)
+        rows = self.cursor.fetchall()
+        return [{'id': row[0], 'name': row[1], 'slug': row[2] or ''} for row in rows]
+
+    def getOrganizationIdsForUser(self, user_id: int) -> list:
+        """Return organization ids the user belongs to"""
+        sql = "SELECT organization_id FROM user_organizations WHERE user_id = %s"
+        self.executeSql(sql, (user_id,))
+        return [row[0] for row in self.cursor.fetchall()]
+
+    def userBelongsToOrganization(self, user_id: int, organization_id: int) -> bool:
+        """Check if user belongs to the given organization"""
+        sql = "SELECT 1 FROM user_organizations WHERE user_id = %s AND organization_id = %s"
+        self.executeSql(sql, (user_id, organization_id))
+        return self.cursor.fetchone() is not None
+
+    def addUserToOrganization(self, user_id: int, organization_id: int) -> None:
+        """Associate a user with an organization"""
+        sql = "INSERT INTO user_organizations (user_id, organization_id) VALUES (%s, %s) ON CONFLICT (user_id, organization_id) DO NOTHING"
+        self.executeSql(sql, (user_id, organization_id))
+        self.connection.commit()
 
     def updateUserPassword(self, username: str, password_hash: str, salt: str) -> None:
         """Update user password"""
