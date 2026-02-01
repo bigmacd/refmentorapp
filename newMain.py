@@ -24,34 +24,6 @@ logger = logging.getLogger(__name__)
 
 state = AppState(logger, ui)
 
-# Handle Streamlit-specific endpoints that bots/bookmarks might request
-# These return 200 to prevent 404 errors in logs without interfering with Socket.IO
-@app.get('/_stcore/host-config')
-def handle_streamlit_host_config():
-    """Handle Streamlit host-config endpoint requests"""
-    return Response(status_code=200, content="", media_type="application/json")
-
-
-@app.get('/_stcore/health')
-def handle_streamlit_health():
-    """Handle Streamlit health endpoint requests"""
-    return Response(status_code=200, content="", media_type="application/json")
-
-
-@app.get('/_nicegui_ws/health')
-def handle_websocket_health():
-    """Diagnostic endpoint to check WebSocket server status"""
-    import sys
-    is_debug = hasattr(sys, 'gettrace') and sys.gettrace() is not None
-    return {
-        'status': 'ok',
-        'websocket_path': '/_nicegui_ws/socket.io/',
-        'debug_mode': is_debug,
-        'message': 'WebSocket server is running' + (' (debug mode may affect connections)' if is_debug else '')
-    }
-
-
-
 def parse_ref_name(name: str) -> Tuple[str, str]:
     """Parse referee name handling various formats"""
     if name == '(requested)':
