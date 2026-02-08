@@ -30,6 +30,13 @@ _static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 if os.path.isdir(_static_dir):
     app.add_static_files('/static', _static_dir)
 
+# Serve service worker at root so it can have scope '/' (required for PWA)
+@app.get('/service-worker.js')
+def serve_service_worker():
+    from fastapi.responses import FileResponse
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'service-worker.js')
+    return FileResponse(path, media_type='application/javascript')
+
 # Handle Streamlit-specific endpoints that bots/bookmarks might request
 # These return 200 to prevent 404 errors in logs without interfering with Socket.IO
 @app.get('/_stcore/host-config')
@@ -164,8 +171,40 @@ def main_page():
         ui.timer(0.1, wait_for_background_load, once=True)
 
 
-    # PWA manifest
+    # PWA manifest and service worker
     ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
+    ui.add_head_html('''
+        <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16x16.png">
+        <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
+    ''')
+    ui.add_head_html('''
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then(function(reg) { console.log('Service worker registered', reg.scope); })
+            .catch(function(err) { console.warn('Service worker registration failed:', err); });
+        });
+      }
+    </script>
+    ''')
+    ui.add_head_html('''
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+          appId: "677b2f11-dd7c-4326-88b9-02bf6f31c5f9",
+          safari_web_id: "web.onesignal.auto.4f832ce8-c167-4c63-9514-5546a8912edb",
+          path: "/service-worker.js",
+          notifyButton: {
+            enable: true,
+          },
+        });
+      });
+    </script>
+    ''')
 
     # Custom CSS
     ui.add_head_html('''

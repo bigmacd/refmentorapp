@@ -255,6 +255,38 @@ def login_page():
 
     ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
     ui.add_head_html('''
+        <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16x16.png">
+        <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
+    ''')
+    ui.add_head_html('''
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then(function(reg) { console.log('Service worker registered', reg.scope); })
+            .catch(function(err) { console.warn('Service worker registration failed:', err); });
+        });
+      }
+    </script>
+    ''')
+    ui.add_head_html('''
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+          appId: "677b2f11-dd7c-4326-88b9-02bf6f31c5f9",
+          safari_web_id: "web.onesignal.auto.4f832ce8-c167-4c63-9514-5546a8912edb",
+          path: "/service-worker.js",
+          notifyButton: {
+            enable: true,
+          },
+        });
+      });
+    </script>
+    ''')
+    ui.add_head_html('''
     <style>
         body.dark {
             background-color: #121212 !important;
