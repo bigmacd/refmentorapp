@@ -190,6 +190,80 @@ def main_page():
     </script>
     ''')
     ui.add_head_html('''
+    <script>
+      window.deferredPrompt = null;
+      window.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      window.isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+      window.addEventListener("beforeinstallprompt", function(e) {
+        e.preventDefault();
+        window.deferredPrompt = e;
+        var btn = document.getElementById("install-app-btn");
+        if (btn) btn.style.display = "";
+      });
+      window.addEventListener("appinstalled", function() { window.deferredPrompt = null; });
+      function triggerInstallPrompt() {
+        var btn = document.getElementById("install-app-btn");
+        if (window.deferredPrompt) {
+          window.deferredPrompt.prompt();
+          window.deferredPrompt.userChoice.then(function(c) {
+            if (c.outcome === "accepted") { window.deferredPrompt = null; }
+          });
+        } else if (window.isIOS) {
+          showInstallModal();
+        } else if (btn) {
+          alert("To install: use your browser menu and select Install app or Add to Home screen.");
+        }
+      }
+      function closeInstallModal() {
+        var m = document.getElementById("install-instructions-modal");
+        if (m) m.style.display = "none";
+      }
+      function updateInstallButtonVisibility() {
+        var btn = document.getElementById("install-app-btn");
+        if (!btn) return;
+        if (window.isStandalone) {
+          btn.style.display = "none";
+        } else if (window.deferredPrompt || window.isIOS) {
+          btn.style.display = "";
+        } else {
+          btn.style.display = "none";
+        }
+      }
+      window.addEventListener("load", function() {
+        updateInstallButtonVisibility();
+        var check = setInterval(function() {
+          var btn = document.getElementById("install-app-btn");
+          if (btn) { updateInstallButtonVisibility(); clearInterval(check); }
+        }, 100);
+      });
+    </script>
+    <div id="install-instructions-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+      <div style="background:#1e293b;color:#fff;max-width:420px;padding:24px;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);max-height:90vh;overflow:auto;">
+        <h3 style="margin:0 0 16px;font-size:1.25rem;">Add to Home Screen</h3>
+        <p id="install-modal-steps" style="margin:0 0 20px;padding-left:0;line-height:1.8;"></p>
+        <button onclick="closeInstallModal()" style="background:#1976d2;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:1rem;">Got it</button>
+      </div>
+    </div>
+    <script>
+      function getInstallStepsHTML() {
+        var ua = navigator.userAgent || "";
+        var isEdge = /Edg\\//i.test(ua);
+        var isDuckDuckGo = /DuckDuckGo\\//i.test(ua);
+        if (isEdge) {
+          return "<p style=\"margin-bottom:12px;\"><strong>In Microsoft Edge:</strong></p><ol style=\"margin:0 0 20px;padding-left:20px;\"><li>Tap the <strong>More</strong> menu (three dots)</li><li>Tap <strong>Share</strong></li><li>Scroll and tap <strong>Add to Home Screen</strong></li><li>Tap <strong>Add</strong></li></ol>";
+        }
+        if (isDuckDuckGo) {
+          return "<p style=\"margin-bottom:12px;\"><strong>In DuckDuckGo:</strong></p><ol style=\"margin:0 0 20px;padding-left:20px;\"><li>Tap the <strong>Share</strong> icon (top right)</li><li>Tap <strong>Add to Home Screen</strong></li><li>Tap <strong>Add</strong></li></ol>";
+        }
+        return "<p style=\"margin-bottom:12px;\"><strong>In Safari:</strong></p><ol style=\"margin:0 0 20px;padding-left:20px;\"><li>Tap the <strong>Share</strong> button (bottom of screen)</li><li>Scroll down and tap <strong>Add to Home Screen</strong></li><li>Tap <strong>Add</strong></li></ol>";
+      }
+      function showInstallModal() {
+        var m = document.getElementById("install-instructions-modal");
+        var steps = document.getElementById("install-modal-steps");
+        if (steps) steps.innerHTML = getInstallStepsHTML();
+        if (m) m.style.display = "flex";
+      }
+    </script>
     <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
     <script>
       window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -247,6 +321,7 @@ def main_page():
 
         ui.separator()
 
+        ui.button('Install App', on_click=lambda: ui.run_javascript('triggerInstallPrompt()')).classes('w-full mt-4').props('flat icon=install_mobile id=install-app-btn')
         ui.button('Change Password', on_click=lambda: ui.navigate.to('/change-password')).classes('w-full mt-4').props('flat')
         ui.button('Logout', on_click=lambda: state.auth_manager.logout()).classes('w-full mt-2').props('flat color=red')
 
