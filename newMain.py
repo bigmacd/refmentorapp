@@ -303,14 +303,22 @@ def main_page():
             gap: 20px;
             flex-wrap: wrap;
         }
+        .drawer-toggle-btn { display: inline-flex; }
+        @media (min-width: 768px) {
+            .drawer-toggle-btn { display: none !important; }
+        }
     </style>
     ''')
 
-    with ui.header().classes('bg-blue-900 text-white'):
+    with ui.header().classes('bg-blue-900 text-white row items-center'):
+        # Hamburger to open drawer (visible on mobile only via CSS above)
+        def toggle_drawer():
+            left_drawer.toggle()
+        ui.button(icon='menu', on_click=toggle_drawer).props('flat color=white').classes('q-mr-sm drawer-toggle-btn')
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold')
 
-    # Left sidebar for user menu
-    with ui.left_drawer(top_corner=True, bottom_corner=True).classes('p-4'):
+    # Left sidebar for user menu (behavior=mobile: overlay and close on outside tap)
+    with ui.left_drawer(top_corner=True, bottom_corner=True).classes('p-4').props('behavior=mobile') as left_drawer:
         current_user = state.auth_manager.get_current_user()
         if current_user:  # Only show if user is actually logged in
             ui.label(f'Logged in as:').classes('text-gray-600 text-sm')
