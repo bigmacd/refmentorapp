@@ -342,7 +342,7 @@ class MentorGameSelection:
             return newRefRecords
 
         # Check if resultsFromRun is available
-        if not hasattr(ui, 'resultsFromRun') or not ui.resultsFromRun:
+        if not hasattr(ui, 'resultsFromRun') or ui.resultsFromRun is None:
             # Show loading state and poll for data
             loading_container = ui.column().classes('items-center justify-center p-8')
             with loading_container:
@@ -351,7 +351,7 @@ class MentorGameSelection:
                 ui.label('Please wait while the workload data is being generated.').classes('text-sm text-gray-500 mt-2')
 
             def check_results_ready():
-                if hasattr(ui, 'resultsFromRun') and ui.resultsFromRun:
+                if hasattr(ui, 'resultsFromRun'):
                     loading_container.clear()
                     loading_container.classes('w-full')
                     with loading_container:
