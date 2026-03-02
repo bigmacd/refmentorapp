@@ -10,6 +10,8 @@ import logging
 from typing import Callable, Optional, Tuple, Any
 from nicegui import ui
 
+# from onesignal_notify import send_push
+
 
 class MentorGameSelection:
     """Component for mentors to select games they want to mentor"""
@@ -79,6 +81,10 @@ class MentorGameSelection:
             )
             if success:
                 ui.notify(message, type='positive')
+                # send_push(
+                #     f"{mentor_name} selected {venue} on {game_date}",
+                #     heading="Game selected",
+                # )
             else:
                 ui.notify(message, type='warning')
         else:
@@ -88,6 +94,10 @@ class MentorGameSelection:
             )
             if success:
                 ui.notify(message, type='positive')
+                # send_push(
+                #     f"{mentor_name} unselected {venue} on {game_date}",
+                #     heading="Game unselected",
+                # )
             else:
                 ui.notify(message, type='warning')
 
@@ -342,7 +352,8 @@ class MentorGameSelection:
             return newRefRecords
 
         # Check if resultsFromRun is available
-        if not hasattr(ui, 'resultsFromRun') or not ui.resultsFromRun:
+        #if not hasattr(ui, 'resultsFromRun') or not ui.resultsFromRun:
+        if not hasattr(ui, 'resultsFromRun') or ui.resultsFromRun is None:
             # Show loading state and poll for data
             loading_container = ui.column().classes('items-center justify-center p-8')
             with loading_container:
@@ -351,7 +362,7 @@ class MentorGameSelection:
                 ui.label('Please wait while the workload data is being generated.').classes('text-sm text-gray-500 mt-2')
 
             def check_results_ready():
-                if hasattr(ui, 'resultsFromRun') and ui.resultsFromRun:
+                if hasattr(ui, 'resultsFromRun'): # and ui.resultsFromRun:
                     loading_container.clear()
                     loading_container.classes('w-full')
                     with loading_container:

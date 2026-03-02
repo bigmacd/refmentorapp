@@ -303,19 +303,16 @@ def main_page():
             gap: 20px;
             flex-wrap: wrap;
         }
-        .drawer-toggle-btn { display: inline-flex; }
-        @media (min-width: 768px) {
-            .drawer-toggle-btn { display: none !important; }
-        }
     </style>
     ''')
 
-    with ui.header().classes('bg-blue-900 text-white row items-center'):
-        # Hamburger to open drawer (visible on mobile only via CSS above)
-        def toggle_drawer():
-            left_drawer.toggle()
-        ui.button(icon='menu', on_click=toggle_drawer).props('flat color=white').classes('q-mr-sm drawer-toggle-btn')
-        ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold')
+    with ui.header().classes('bg-blue-900 text-white'):
+        with ui.row().classes('items-center no-wrap w-full'):
+            # Hamburger to open drawer (visible on mobile only via CSS above)
+            def toggle_drawer():
+                left_drawer.toggle()
+            ui.button(icon='menu', on_click=toggle_drawer).props('flat color=white dense').classes('q-mr-sm')
+            ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold')
 
     # Left sidebar for user menu (behavior=mobile: overlay and close on outside tap)
     with ui.left_drawer(top_corner=True, bottom_corner=True).classes('p-4').props('behavior=mobile') as left_drawer:

@@ -83,8 +83,6 @@ def getRiskyRefs() -> list:
 
 def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list) -> dict:
 
-    minimizeOutput = os.environ.get('MINIMIZE_OUTPUT', 'false').lower() == 'true'
-
     current = {}
     for c in sorted(currentu):
         current[c] = currentu[c]
