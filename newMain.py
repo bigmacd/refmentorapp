@@ -13,6 +13,7 @@ from typing import Tuple
 import rmaLogging
 
 from fastapi import Response
+from fastapi.staticfiles import StaticFiles
 from nicegui import ui, app
 
 from appState import AppState
@@ -23,6 +24,24 @@ from mentor_game_selection import MentorGameSelection
 logger = logging.getLogger(__name__)
 
 state = AppState(logger, ui)
+
+
+# Serve static files (PWA manifest, icons)
+_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+if os.path.isdir(_static_dir):
+    app.add_static_files('/static', _static_dir)
+
+# @app.get('/_nicegui_ws/health')
+# def handle_websocket_health():
+#     """Diagnostic endpoint to check WebSocket server status"""
+#     import sys
+#     is_debug = hasattr(sys, 'gettrace') and sys.gettrace() is not None
+#     return {
+#         'status': 'ok',
+#         'websocket_path': '/_nicegui_ws/socket.io/',
+#         'debug_mode': is_debug,
+#         'message': 'WebSocket server is running' + (' (debug mode may affect connections)' if is_debug else '')
+#     }
 
 def parse_ref_name(name: str) -> Tuple[str, str]:
     """Parse referee name handling various formats"""
@@ -129,6 +148,9 @@ def main_page():
         # Start polling for background load completion
         ui.timer(0.1, wait_for_background_load, once=True)
 
+
+    # PWA manifest
+    ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
 
     # Custom CSS
     ui.add_head_html('''

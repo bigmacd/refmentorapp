@@ -253,6 +253,7 @@ def login_page():
         </script>
     ''')
 
+    ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
     ui.add_head_html('''
     <style>
         body.dark {
