@@ -1,7 +1,10 @@
 import os
 import datetime
+import re
 import time
 import logging
+
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
 logger = logging.getLogger(__name__)
 
@@ -35,25 +38,7 @@ class MySoccerLeague(RefereeWebSite):
         self._loginFormInput = { 'userName': os.environ['mslUsername'],
                                 'password': os.environ['mslPassword'] }
 
-        login_success = False
-        for attempt in range(1, 4):
-            logger.info(f"[MySoccerLeague.__init__] Login attempt {attempt}/3")
-            try:
-                self._login()
-                logger.info(f"[MySoccerLeague.__init__] Login attempt {attempt} succeeded")
-                login_success = True
-                break
-            except Exception as ex:
-                logger.warning(f"[MySoccerLeague.__init__] Login attempt {attempt} failed: {ex}")
-                if attempt < 3:
-                    logger.info(f"[MySoccerLeague.__init__] Waiting 3 seconds before retry...")
-                    time.sleep(3)
-                else:
-                    logger.error(f"[MySoccerLeague.__init__] All login attempts failed")
-                    raise
-
-        if not login_success:
-            raise RuntimeError("Failed to login to MySoccerLeague after 3 attempts")
+        self._login()
 
         logger.info("[MySoccerLeague.__init__] Calculating future dates")
         self._getFutureDates(datetime.date.today())
@@ -61,6 +46,13 @@ class MySoccerLeague(RefereeWebSite):
         logger.info("[MySoccerLeague.__init__] Initialization complete")
 
 
+    @retry(
+        stop=stop_after_attempt(20),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        retry=retry_if_exception_type(Exception),
+        reraise=True,
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    )
     def _login(self):
         # The site we will navigate into, handling it's session
         logger.info(f"[_login] Step 1: Opening login page: {self._baseUrl}")
@@ -204,6 +196,13 @@ class MySoccerLeague(RefereeWebSite):
 
 
     def getMatches(self, dateInfo: str) -> dict:
+
+        def getGameId(text: str) -> str:
+            pattern = re.compile(r"\b\d{6}\b")
+            matches = pattern.findall(text)
+            return matches[0]
+
+
         url_template = 'https://www.mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=allDates&date={1}'
 
         logger.info(f"[getMatches] Processing date: {dateInfo}")
@@ -278,6 +277,9 @@ class MySoccerLeague(RefereeWebSite):
             gameTime = elements[2].text
             age = elements[4].text
             gameId = elements[0].text
+
+            # Dianne sometimes puts extra text in the gameId field, so we need to extract the number
+            gameId = getGameId(gameId)
 
 
             if field not in retVal:

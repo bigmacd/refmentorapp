@@ -536,13 +536,13 @@ def render_reports_tab():
 
             try:
                 if sel_type == 'year':
-                    data = state.db.produceYearReport(sel_value, report_format)
+                    data = state.db.produceYearReport(sel_value)
                 elif sel_type == 'week':
-                    data = state.db.produceWeekReport(sel_value, report_format)
+                    data = state.db.produceWeekReport(sel_value)
                 elif sel_type == 'referee':
-                    data = state.db.produceRefereeReport(sel_value, report_format)
+                    data = state.db.produceRefereeReport(sel_value)
                 elif sel_type == 'mentor':
-                    data = state.db.produceMentorReport(sel_value, report_format)
+                    data = state.db.produceMentorReport(sel_value)
                 else:
                     return
 

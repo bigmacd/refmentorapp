@@ -659,7 +659,23 @@ class RefereeDbCockroach(object):
     def _getTextFromSessions(self, sessions):
 
         # TODO - use game details in the report if not null (from database left joining)
-        #
+        # These are the columns we have from the left join:
+        # firstname
+        # lastname
+        # position
+        # date
+        # comments
+        # mentor_last_name
+        # mentor_first_name
+        # gameid
+        # center
+        # ar1
+        # ar2
+        # game_date
+        # venue
+        # time
+        # age
+        # level
 
         retVal = ''
         # [0] is firstname, [1] is lastname, [2] is position
@@ -675,7 +691,16 @@ class RefereeDbCockroach(object):
                     'ref': f'{session[0].capitalize()} {session[1].capitalize()}',
                     'position': session[2],
                     'mentor': f'{session[6].capitalize()} {session[5].capitalize()}',
-                    'comments': session[4]
+                    'comments': session[4],
+                    'gameid': session[7],
+                    'center': session[8],
+                    'ar1': session[9],
+                    'ar2': session[10],
+                    'game_date': session[11],
+                    'venue': session[12],
+                    'time': session[13],
+                    'age': session[14],
+                    'level': session[15]
                 }
             sessionData[date].append(entry)
 
@@ -688,27 +713,39 @@ class RefereeDbCockroach(object):
                 retVal += f"\tMentor: {entry['mentor']}\r\n"
                 retVal += f"\tComments: {entry['comments']}\r\n\r\n"
 
+                if entry['gameid'] is not None:
+                    retVal += f"\tGame Details:\r\n"
+                    retVal += f"\t\tGame ID: {entry['gameid']}\r\n"
+                    retVal += f"\t\tCenter: {entry['center']}\r\n"
+                    retVal += f"\t\tAR1: {entry['ar1']}\r\n"
+                    retVal += f"\t\tAR2: {entry['ar2']}\r\n"
+                    retVal += f"\t\tGame Date: {entry['game_date']}\r\n"
+                    retVal += f"\t\tVenue: {entry['venue']}\r\n"
+                    retVal += f"\t\tTime: {entry['time']}\r\n"
+                    retVal += f"\t\tAge Group: {entry['age']}\r\n"
+                    retVal += f"\t\tLevel: {entry['level']}\r\n\r\n"
+
         return retVal
 
 
-    def produceYearReport(self, year, reportType):
+    def produceYearReport(self, year):
         sessions = self.getMentoringSessionDetails(year)
         return self._getTextFromSessions(sessions)
 
 
-    def produceWeekReport(self, week, reportType):
+    def produceWeekReport(self, week):
         sessions = self.getMentoringsessionsForWeek(week)
         return self._getTextFromSessions(sessions)
 
 
-    def produceRefereeReport(self, referee, reportType):
+    def produceRefereeReport(self, referee):
         for name in referee:
             name.lower()
         sessions = self.getMentoringsessionsForReferee(referee)
         return self._getTextFromSessions(sessions)
 
 
-    def produceMentorReport(self, mentor, reportType):
+    def produceMentorReport(self, mentor):
         sessions = self.getMentoringsessionsForMentor(mentor)
         return self._getTextFromSessions(sessions)
 
