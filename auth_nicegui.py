@@ -272,7 +272,7 @@ def login_page():
 
     with ui.card().classes('login-container'):
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold text-center w-full mb-2')
-        ui.label('Please log in to continue').classes('text-gray-600 text-center w-full mb-6')
+        ui.label('Please log in to continue').classes('text-gray-300 text-center w-full mb-6')
 
         orgs = auth_manager.get_organizations()
         # NiceGUI select: dict keys = stored value, dict values = display label
@@ -317,8 +317,8 @@ def login_page():
                     ui.label('Invalid username, password, or you do not have access to the selected organization.').classes('text-red-500')
 
         ui.button('Login', on_click=do_login).classes('w-full mt-4').props('color=primary')
-
         ui.button('Forgot Password?', on_click=lambda: ui.navigate.to('/forgot-password')).classes('w-full mt-2').props('flat')
+        ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
 
 
 @ui.page('/forgot-password')
