@@ -216,6 +216,9 @@ def main_page():
             ui.label('Admin Functions').classes('font-bold text-sm')
             ui.button('User Management', on_click=lambda: ui.navigate.to('/admin/users')).classes('w-full mt-2').props('flat')
 
+        ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
+
+
 
     # Tab navigation using NiceGUI tabs
     with ui.tabs().classes('w-full') as tabs:

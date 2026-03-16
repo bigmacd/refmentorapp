@@ -5,6 +5,7 @@ EXPOSE 443
 WORKDIR /app
 
 COPY requirements.txt /app/
+COPY VERSION /app/VERSION
 COPY *.py /app/
 COPY root.crt /root/.postgresql/root.crt
 COPY mslChain.pem /app/mslChain.pem
