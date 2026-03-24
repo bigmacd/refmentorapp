@@ -1,4 +1,5 @@
 import os
+import certifi
 import datetime
 import re
 import time
@@ -33,7 +34,7 @@ class MySoccerLeague(RefereeWebSite):
 
     def __init__(self, br):
         super(MySoccerLeague, self).__init__(br)
-        self._browser.session.verify = "./mslChain.pem"
+        self._browser.session.verify = self._getCertChain()
         self._baseUrl = self._loginPage = "https://mysoccerleague.com/YSLmobile.jsp"
         self._loginFormInput = { 'userName': os.environ['mslUsername'],
                                 'password': os.environ['mslPassword'] }
@@ -44,6 +45,22 @@ class MySoccerLeague(RefereeWebSite):
         self._getFutureDates(datetime.date.today())
         self.emails = []
         logger.info("[MySoccerLeague.__init__] Initialization complete")
+
+
+    def _getCertChain(self):
+        certifi_bundle = certifi.where()
+        with open(certifi_bundle, 'rb') as f:
+            default_certs = f.read()
+
+        with open('mysoccerleague.com.chained.crt', 'rb') as f:
+            custom_certs = f.read()
+
+        full_bundle = default_certs + b'\n' + custom_certs
+
+        with open('full-ca-bundle.pem', 'wb') as f:
+            f.write(full_bundle)
+
+        return 'full-ca-bundle.pem'
 
 
     @retry(
@@ -198,9 +215,15 @@ class MySoccerLeague(RefereeWebSite):
     def getMatches(self, dateInfo: str) -> dict:
 
         def getGameId(text: str) -> str:
-            pattern = re.compile(r"\b\d{6}\b")
-            matches = pattern.findall(text)
-            return matches[0]
+            # Some MSL gameId fields look like "798732FORFEIT" (digits + extra text).
+            # Using word-boundaries ("\b...\b") fails when the digits are immediately
+            # followed by letters. Instead, just extract the first 6-digit sequence.
+            if text is None:
+                return ""
+            match = re.search(r"\d{6}", str(text))
+            if not match:
+                return ""
+            return match.group(0)
 
 
         url_template = 'https://www.mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=allDates&date={1}'

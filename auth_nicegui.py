@@ -54,9 +54,14 @@ class AuthManager:
     def authenticate_user(self, username: str, password: str, organization_id: Optional[int] = None) -> bool:
         """Authenticate a user with username and password. If organization_id is given, user must belong to that organization."""
         user = self.db.getUserByUsername(username)
-        if not user or not self.verify_password(password, user['password_hash'], user['salt']):
+        if not user:
+            logging.error(f"User {username} not found")
+            return False
+        if not self.verify_password(password, user['password_hash'], user['salt']):
+            logging.error(f"User {username} failed to login with password")
             return False
         if organization_id is not None and not self.db.userBelongsToOrganization(user['id'], organization_id):
+            logging.error(f"User {username} does not belong to organization {organization_id}")
             return False
         # Store in app storage
         app.storage.user['authenticated'] = True
@@ -313,6 +318,7 @@ def login_page():
                 # Navigate to main page (which will show its own loading spinner while data loads)
                 ui.navigate.to('/')
             else:
+                logging.error(f"User {username_input.value} failed to login using organization {org_id}")
                 with message_area:
                     ui.label('Invalid username, password, or you do not have access to the selected organization.').classes('text-red-500')
 

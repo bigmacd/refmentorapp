@@ -2,6 +2,7 @@
 nicegui>=1.4.0
 wsproto>=1.2.0  # WebSocket implementation to avoid legacy websockets API issues
 beautifulsoup4==4.11.1
+certifi==2023.7.22
 lxml==6.0.2
 MechanicalSoup==1.2.0
 psycopg==3.2.13
