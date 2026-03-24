@@ -318,7 +318,7 @@ def login_page():
                 # Navigate to main page (which will show its own loading spinner while data loads)
                 ui.navigate.to('/')
             else:
-                logging.error(f"User {username_input.value} failed to login usingorganization {org_id}")
+                logging.error(f"User {username_input.value} failed to login using organization {org_id}")
                 with message_area:
                     ui.label('Invalid username, password, or you do not have access to the selected organization.').classes('text-red-500')
 
