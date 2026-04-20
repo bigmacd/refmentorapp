@@ -31,7 +31,7 @@ ARG STORAGE_SECRET
 ENV STORAGE_SECRET $STORAGE_SECRET
 ARG LOG_LEVEL
 ENV LOG_LEVEL $LOG_LEVEL
+ARG PORT
+ENV PORT $PORT
 
 ENTRYPOINT ["python3", "newMain.py"]
-
-# docker run -p 443:443 --name refmentor refmentor:latest

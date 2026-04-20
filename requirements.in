@@ -1,0 +1,24 @@
+# Referee Mentor System — direct dependencies only.
+# Regenerate the lock file with: tools/repinDependancies.sh (or see script for exact commands).
+# Versions align with venvRequirements.txt / resolved tree for this project.
+
+nicegui==3.10.0
+wsproto==1.3.2
+beautifulsoup4==4.11.1
+certifi==2026.2.25
+lxml==6.0.2
+MechanicalSoup==1.2.0
+psycopg==3.2.13
+psycopg-binary==3.2.13
+password-validator==1.0
+google-api-python-client==2.184.0
+google-auth==2.16.1
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.0.0
+gspread==5.7.2
+oauth2client==4.1.3
+openpyxl==3.0.10
+XlsxWriter==3.1.0
+pandas==2.3.3
+requests==2.32.2
+tenacity==8.2.3

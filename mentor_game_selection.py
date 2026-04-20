@@ -119,12 +119,12 @@ class MentorGameSelection:
 
         selections = self._get_game_selections_for_date(date_str)
 
-        with ui.expansion(date_str, icon='event').classes('w-full mb-4'):
+        with ui.expansion(date_str, icon='event', value=True).classes('w-full mb-4'):
             # Get venues for this date
             venues = sorted(games_by_venue.keys())
 
             for venue in venues:
-                with ui.expansion(venue, icon='place').classes('w-full mb-2'):
+                with ui.expansion(venue, icon='place', value=True).classes('w-full mb-2'):
                     games = games_by_venue[venue]
 
                     # Render games as cards for better UX
@@ -212,10 +212,14 @@ class MentorGameSelection:
     def _organizeDatesIntoWeekends(self, dates: list) -> list:
         """Organize a list of date strings into weekends (Fri/Sat/Sun groups)"""
 
-        fmt = '%A, %B %-d, %Y'
+        fmt = '%A, %B %d, %Y'
 
         # parse and sort
-        dt_list = sorted(datetime.strptime(d, fmt) for d in dates)
+        try:
+            dt_list = sorted(datetime.strptime(d, fmt) for d in dates)
+        except Exception as e:
+            self.logger.error(f"Error organizing dates into weekends: {e}")
+            return []
 
         groups = defaultdict(list)
 
