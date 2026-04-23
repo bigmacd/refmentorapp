@@ -1,6 +1,5 @@
 
 import threading
-from datetime import datetime as dtime, timedelta, time
 from contextlib import redirect_stdout
 from io import StringIO
 
@@ -30,8 +29,8 @@ class AppState:
         # Don't block on initialization - start loading in background
         self._start_background_load()
         self._start_background_workload_load()
-        # Start daily reload scheduler
-        self._start_daily_reload_scheduler()
+        # Start periodic MySoccerLeague reload scheduler
+        self._start_periodic_reload_scheduler()
 
     def _start_background_load(self, force_reload=False):
         """Start loading data in a background thread without blocking
@@ -61,7 +60,7 @@ class AppState:
                 self._loading = True
                 try:
                     self.logger.info("Loading match data from MySoccerLeague...")
-                    self.all_match_data = getAllData()
+                    self.all_match_data = getAllData(force_refresh=force_reload)
                     self.dates = list(self.all_match_data.keys())
                     self.loaded = True
                     self.logger.info(f"Successfully loaded data for {len(self.dates)} dates")
@@ -128,49 +127,35 @@ class AppState:
         """Check if data is currently being loaded"""
         return self._loading
 
-    def _calculate_next_reload_time(self):
-        """Calculate the datetime for the next 12:01 AM"""
-        now = dtime.now()
-        # Target time is 12:01 AM
-        target_time = time(0, 1, 0)  # 12:01 AM
+    # Interval between automatic full refetches from MySoccerLeague (and workload rebuild).
+    RELOAD_INTERVAL_HOURS = 2
 
-        # Create datetime for today at 12:01 AM
-        next_reload = dtime.combine(now.date(), target_time)
+    def _schedule_periodic_reload(self):
+        """Schedule the next full data reload after RELOAD_INTERVAL_HOURS."""
+        seconds_until_reload = self.RELOAD_INTERVAL_HOURS * 3600
 
-        # If it's already past 12:01 AM today, schedule for tomorrow
-        if now >= next_reload:
-            next_reload += timedelta(days=1)
+        self.logger.info(
+            f"Scheduling next MySoccerLeague data reload in {self.RELOAD_INTERVAL_HOURS} hour(s) "
+            f"({seconds_until_reload} seconds)"
+        )
 
-        return next_reload
-
-    def _schedule_daily_reload(self):
-        """Schedule the next daily reload at 12:01 AM"""
-        next_reload_time = self._calculate_next_reload_time()
-        now = dtime.now()
-        seconds_until_reload = (next_reload_time - now).total_seconds()
-
-        self.logger.info(f"Scheduling next daily data reload at {next_reload_time.strftime('%Y-%m-%d %H:%M:%S')} "
-                   f"(in {seconds_until_reload/3600:.2f} hours)")
-
-        def perform_daily_reload():
-            """Perform the daily reload and schedule the next one"""
+        def perform_periodic_reload():
             try:
-                self.logger.info("Starting scheduled daily data reload at 12:01 AM...")
-                # Reload both datasets
+                self.logger.info(
+                    f"Starting scheduled data reload (every {self.RELOAD_INTERVAL_HOURS} hours)..."
+                )
                 self._start_background_load(force_reload=True)
                 self._start_background_workload_load(force_reload=True)
-                self.logger.info("Daily data reload completed")
+                self.logger.info("Scheduled data reload completed")
             except Exception as e:
-                self.logger.error(f"Error during daily data reload: {e}", exc_info=True)
+                self.logger.error(f"Error during scheduled data reload: {e}", exc_info=True)
             finally:
-                # Schedule the next reload
-                self._schedule_daily_reload()
+                self._schedule_periodic_reload()
 
-        # Schedule the reload
-        timer = threading.Timer(seconds_until_reload, perform_daily_reload)
+        timer = threading.Timer(seconds_until_reload, perform_periodic_reload)
         timer.daemon = True
         timer.start()
 
-    def _start_daily_reload_scheduler(self):
-        """Start the daily reload scheduler"""
-        self._schedule_daily_reload()
+    def _start_periodic_reload_scheduler(self):
+        """Start the periodic reload scheduler (see RELOAD_INTERVAL_HOURS)."""
+        self._schedule_periodic_reload()

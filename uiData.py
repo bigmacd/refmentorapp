@@ -13,7 +13,7 @@ class UIData:
     """
     Singleton class for managing UI data from MySoccerLeague.
     Ensures data is only fetched once and reused across the application.
-    Automatically refreshes data when it becomes stale (default: 24 hours).
+    Automatically refreshes data when it becomes stale (default: 2 hours).
     """
     _instance: Optional['UIData'] = None
     _initialized: bool = False
@@ -23,12 +23,12 @@ class UIData:
             cls._instance = super(UIData, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, ttl_hours: int = 24):
+    def __init__(self, ttl_hours: int = 2):
         """
         Initialize the singleton instance.
 
         Args:
-            ttl_hours: Time-to-live in hours before data is considered stale (default: 24)
+            ttl_hours: Time-to-live in hours before data is considered stale (default: 2)
         """
         if not self._initialized:
             self.allMatchData: Optional[dict] = None
