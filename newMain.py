@@ -628,7 +628,7 @@ if __name__ in {"__main__", "__mp_main__"}:
     #     default_host = '127.0.0.1'  # Local development - browsers can connect to this
     # host = os.environ.get('HOST', default_host)
 
-    logger.info(f"Starting NiceGUI server on {host}:{port}")
+    logger.info(f"Starting NiceGUI server on {'0.0.0.0'}:{443}")
 
     ui.run(
         title='Referee Mentor System',
