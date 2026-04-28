@@ -212,7 +212,7 @@ class MentorGameSelection:
     def _organizeDatesIntoWeekends(self, dates: list) -> list:
         """Organize a list of date strings into weekends (Fri/Sat/Sun groups)"""
 
-        fmt = '%A, %B %d, %Y'
+        fmt = '%A, %B %-d, %Y'
 
         # parse and sort
         try:
@@ -313,7 +313,8 @@ class MentorGameSelection:
                 closestGroupIndex, _ = min(futureDates, key=lambda t: t[1] - currentDate)
             return closestGroupIndex
 
-        thisWeekendDates = weekend_dates[indexOfClosestDate(weekend_dates)]
+        closestIndex = indexOfClosestDate(weekend_dates)
+        thisWeekendDates = weekend_dates[closestIndex]
 
         if not thisWeekendDates:
             ui.label('No weekend games found.').classes('text-gray-500 mt-4')
@@ -325,10 +326,13 @@ class MentorGameSelection:
             def convertDate(date: str) -> str:
                 return datetime.strptime(date, "%A, %B %d, %Y").strftime("%m/%d/%Y")
             def findGame(gameId: str, field: str) -> dict:
+                #try:
                 for game in self.all_match_data[date][field]:
                     if game['GameID'] == gameId:
                         return game
                 return None
+                #except KeyError:
+                #    return None
             dateToMatch = convertDate(date)
             for field in ui.resultsFromRun.keys():
                 if field not in newRefRecords:
