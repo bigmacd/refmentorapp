@@ -617,23 +617,23 @@ def render_workload_tab():
 if __name__ in {"__main__", "__mp_main__"}:
     # Allow port to be configured via environment variable for local development
     # Default to 443 for Docker, but allow override (e.g., 8080 for local dev)
-    port = int(os.environ.get('PORT', 443))
+    # port = int(os.environ.get('PORT', 443))
 
-    # Configure host - use 127.0.0.1 for local development (browsers can't connect to 0.0.0.0)
-    # Use 0.0.0.0 for Docker/production where external access is needed
-    # Can be explicitly overridden via HOST environment variable
-    if port == 443:
-        default_host = '0.0.0.0'  # Docker/external access
-    else:
-        default_host = '127.0.0.1'  # Local development - browsers can connect to this
-    host = os.environ.get('HOST', default_host)
+    # # Configure host - use 127.0.0.1 for local development (browsers can't connect to 0.0.0.0)
+    # # Use 0.0.0.0 for Docker/production where external access is needed
+    # # Can be explicitly overridden via HOST environment variable
+    # if port == 443:
+    #     default_host = '0.0.0.0'  # Docker/external access
+    # else:
+    #     default_host = '127.0.0.1'  # Local development - browsers can connect to this
+    # host = os.environ.get('HOST', default_host)
 
     logger.info(f"Starting NiceGUI server on {host}:{port}")
 
     ui.run(
         title='Referee Mentor System',
-        port=port,
-        host=host,
+        port=443,
+        host='0.0.0.0',
         reload=False,
         show=False,
         dark=True,  # Force dark mode exclusively
