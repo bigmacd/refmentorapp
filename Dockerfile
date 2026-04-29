@@ -1,4 +1,4 @@
-FROM python:3.13.9-slim-bookworm
+FROM python:3.13.13-alpine3.23
 
 EXPOSE 443
 
@@ -13,25 +13,5 @@ COPY psyched-runner-378322-6ea04e89b69e.json /app/psyched-runner-378322-6ea04e89
 
 
 RUN pip3 install -r requirements.txt
-
-ARG STORAGE_ACCOUNT_NAME
-ENV STORAGE_ACCOUNT_NAME $STORAGE_ACCOUNT_NAME
-
-ARG mslUsername
-ENV mslUsername $mslUsername
-ARG mslPassword
-ENV mslPassword $mslPassword
-ARG db_url
-ENV db_url $db_url
-ARG EMAIL_USER
-ENV EMAIL_USER $EMAIL_USER
-ARG EMAIL_TOKEN
-ENV EMAIL_TOKEN $EMAIL_TOKEN
-ARG STORAGE_SECRET
-ENV STORAGE_SECRET $STORAGE_SECRET
-ARG LOG_LEVEL
-ENV LOG_LEVEL $LOG_LEVEL
-ARG PORT
-ENV PORT $PORT
 
 ENTRYPOINT ["python3", "newMain.py"]
