@@ -119,12 +119,12 @@ class MentorGameSelection:
 
         selections = self._get_game_selections_for_date(date_str)
 
-        with ui.expansion(date_str, icon='event').classes('w-full mb-4'):
+        with ui.expansion(date_str, icon='event', value=True).classes('w-full mb-4'):
             # Get venues for this date
             venues = sorted(games_by_venue.keys())
 
             for venue in venues:
-                with ui.expansion(venue, icon='place').classes('w-full mb-2'):
+                with ui.expansion(venue, icon='place', value=True).classes('w-full mb-2'):
                     games = games_by_venue[venue]
 
                     # Render games as cards for better UX
@@ -215,7 +215,11 @@ class MentorGameSelection:
         fmt = '%A, %B %-d, %Y'
 
         # parse and sort
-        dt_list = sorted(datetime.strptime(d, fmt) for d in dates)
+        try:
+            dt_list = sorted(datetime.strptime(d, fmt) for d in dates)
+        except Exception as e:
+            self.logger.error(f"Error organizing dates into weekends: {e}")
+            return []
 
         groups = defaultdict(list)
 
@@ -309,7 +313,8 @@ class MentorGameSelection:
                 closestGroupIndex, _ = min(futureDates, key=lambda t: t[1] - currentDate)
             return closestGroupIndex
 
-        thisWeekendDates = weekend_dates[indexOfClosestDate(weekend_dates)]
+        closestIndex = indexOfClosestDate(weekend_dates)
+        thisWeekendDates = weekend_dates[closestIndex]
 
         if not thisWeekendDates:
             ui.label('No weekend games found.').classes('text-gray-500 mt-4')
@@ -321,10 +326,13 @@ class MentorGameSelection:
             def convertDate(date: str) -> str:
                 return datetime.strptime(date, "%A, %B %d, %Y").strftime("%m/%d/%Y")
             def findGame(gameId: str, field: str) -> dict:
+                #try:
                 for game in self.all_match_data[date][field]:
                     if game['GameID'] == gameId:
                         return game
                 return None
+                #except KeyError:
+                #    return None
             dateToMatch = convertDate(date)
             for field in ui.resultsFromRun.keys():
                 if field not in newRefRecords:

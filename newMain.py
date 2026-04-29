@@ -554,21 +554,25 @@ def render_workload_tab():
     with ui.card().classes('form-container w-full'):
         ui.label('Current Workload').classes('text-xl font-bold mb-4')
 
-        output_area = ui.code('Loading workload data...').classes('w-full')
+        # Use ui.label + .text (BindableProperty) so updates reach the browser.
+        # ui.code's .content is not bound the same way; assigning it often does not refresh the client.
+        output_area = ui.label('Loading workload data...').classes(
+            'w-full whitespace-pre-wrap font-mono text-sm p-4 rounded bg-gray-900'
+        )
 
         def check_workload_status():
             """Check if workload loading is complete and update UI"""
             if not state.workload_loading:
                 # Loading is complete, update UI
                 if state.workload_error:
-                    output_area.content = f'Error loading workload: {state.workload_error}'
+                    output_area.text = f'Error loading workload: {state.workload_error}'
                 elif state.workload_output:
-                    output_area.content = state.workload_output
+                    output_area.text = state.workload_output
                 elif ui.resultsFromRun:
                     # Data is available but output wasn't captured, show success message
-                    output_area.content = 'Workload data loaded successfully.'
+                    output_area.text = 'Workload data loaded successfully.'
                 else:
-                    output_area.content = 'No workload data available'
+                    output_area.text = 'No workload data available'
                 # Timer will stop automatically since we don't reschedule
             else:
                 # Still loading, check again in 0.5 seconds
@@ -577,11 +581,11 @@ def render_workload_tab():
         # Check if already loaded
         if not state.workload_loading:
             if state.workload_error:
-                output_area.content = f'Error loading workload: {state.workload_error}'
+                output_area.text = f'Error loading workload: {state.workload_error}'
             elif state.workload_output:
-                output_area.content = state.workload_output
+                output_area.text = state.workload_output
             elif hasattr(ui, 'resultsFromRun') and ui.resultsFromRun:
-                output_area.content = 'Workload data loaded successfully.'
+                output_area.text = 'Workload data loaded successfully.'
             else:
                 # Data not loaded yet, start loading if not already started
                 if not hasattr(ui, 'resultsFromRun') or ui.resultsFromRun is None:
@@ -600,9 +604,9 @@ if __name__ in {"__main__", "__mp_main__"}:
     # Default to 443 for Docker, but allow override (e.g., 8080 for local dev)
     port = int(os.environ.get('PORT', 443))
 
-    # Configure host - use 127.0.0.1 for local development (browsers can't connect to 0.0.0.0)
-    # Use 0.0.0.0 for Docker/production where external access is needed
-    # Can be explicitly overridden via HOST environment variable
+    # # Configure host - use 127.0.0.1 for local development (browsers can't connect to 0.0.0.0)
+    # # Use 0.0.0.0 for Docker/production where external access is needed
+    # # Can be explicitly overridden via HOST environment variable
     if port == 443:
         default_host = '0.0.0.0'  # Docker/external access
     else:
@@ -613,8 +617,8 @@ if __name__ in {"__main__", "__mp_main__"}:
 
     ui.run(
         title='Referee Mentor System',
-        port=port,
-        host=host,
+        port=443,
+        host='0.0.0.0',
         reload=False,
         show=False,
         dark=True,  # Force dark mode exclusively

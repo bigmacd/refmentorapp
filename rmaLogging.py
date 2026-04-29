@@ -24,6 +24,19 @@ logging.getLogger('uvicorn').setLevel(log_level)
 logging.getLogger('uvicorn.access').setLevel(log_level)
 logging.getLogger('uvicorn.error').setLevel(log_level)
 
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+# By default we hide noisy Socket.IO / WebSocket stack traces. That also hides the *real* reason
+# the browser shows "WebSocket connection ... failed". Set REFMENTOR_LOG_WEBSOCKETS=1 when debugging.
+_SUPPRESS_WEBSOCKET_LOG_NOISE = not _env_truthy('REFMENTOR_LOG_WEBSOCKETS')
+if not _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    logging.getLogger('rmaLogging').warning(
+        'REFMENTOR_LOG_WEBSOCKETS is set: showing full WebSocket / Socket.IO / engineio logs'
+    )
+
 # Filter out non-critical drawer timeout errors
 class DrawerTimeoutFilter(logging.Filter):
     def filter(self, record):
@@ -106,36 +119,53 @@ class StarletteDeprecationFilter(logging.Filter):
 # Apply filters to relevant loggers
 nicegui_logger = logging.getLogger('nicegui')
 nicegui_logger.addFilter(DrawerTimeoutFilter())
-nicegui_logger.addFilter(SocketIOErrorFilter())
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    nicegui_logger.addFilter(SocketIOErrorFilter())
 
 # Also filter asyncio logger which reports Socket.IO task exceptions
 asyncio_logger = logging.getLogger('asyncio')
-asyncio_logger.addFilter(SocketIOErrorFilter())
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    asyncio_logger.addFilter(SocketIOErrorFilter())
 
 # Filter socketio logger directly if it exists
 socketio_logger = logging.getLogger('socketio')
-socketio_logger.addFilter(SocketIOErrorFilter())
-socketio_logger.addFilter(WebSocketErrorFilter())
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    socketio_logger.addFilter(SocketIOErrorFilter())
+    socketio_logger.addFilter(WebSocketErrorFilter())
+else:
+    socketio_logger.setLevel(log_level)
 
 # Filter engineio logger (used by socketio) - be very aggressive
 engineio_logger = logging.getLogger('engineio')
-engineio_logger.addFilter(WebSocketErrorFilter())
-engineio_logger.setLevel(logging.CRITICAL)  # Only show critical errors
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    engineio_logger.addFilter(WebSocketErrorFilter())
+    engineio_logger.setLevel(logging.CRITICAL)  # Only show critical errors
+else:
+    engineio_logger.setLevel(log_level)
 
 # Filter websockets logger - be very aggressive
 websockets_logger = logging.getLogger('websockets')
-websockets_logger.addFilter(WebSocketErrorFilter())
-websockets_logger.setLevel(logging.CRITICAL)  # Only show critical errors
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    websockets_logger.addFilter(WebSocketErrorFilter())
+    websockets_logger.setLevel(logging.CRITICAL)  # Only show critical errors
+else:
+    websockets_logger.setLevel(log_level)
 
 # Filter websockets.legacy specifically
 websockets_legacy_logger = logging.getLogger('websockets.legacy')
-websockets_legacy_logger.addFilter(WebSocketErrorFilter())
-websockets_legacy_logger.setLevel(logging.CRITICAL)
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    websockets_legacy_logger.addFilter(WebSocketErrorFilter())
+    websockets_legacy_logger.setLevel(logging.CRITICAL)
+else:
+    websockets_legacy_logger.setLevel(log_level)
 
 # Filter websockets.legacy.server specifically
 websockets_legacy_server_logger = logging.getLogger('websockets.legacy.server')
-websockets_legacy_server_logger.addFilter(WebSocketErrorFilter())
-websockets_legacy_server_logger.setLevel(logging.CRITICAL)
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    websockets_legacy_server_logger.addFilter(WebSocketErrorFilter())
+    websockets_legacy_server_logger.setLevel(logging.CRITICAL)
+else:
+    websockets_legacy_server_logger.setLevel(log_level)
 
 # Filter Starlette deprecation warnings
 starlette_logger = logging.getLogger('starlette')
@@ -143,21 +173,29 @@ starlette_logger.addFilter(StarletteDeprecationFilter())
 
 # Filter uvicorn websocket errors - be very aggressive
 uvicorn_logger = logging.getLogger('uvicorn')
-uvicorn_logger.addFilter(WebSocketErrorFilter())
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    uvicorn_logger.addFilter(WebSocketErrorFilter())
 
 # Filter uvicorn.protocols.websockets specifically - suppress ALL messages
 uvicorn_protocol_logger = logging.getLogger('uvicorn.protocols.websockets')
-uvicorn_protocol_logger.addFilter(WebSocketErrorFilter())
-uvicorn_protocol_logger.setLevel(logging.CRITICAL + 1)  # Disable all logging
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    uvicorn_protocol_logger.addFilter(WebSocketErrorFilter())
+    uvicorn_protocol_logger.setLevel(logging.CRITICAL + 1)  # Disable all logging
+else:
+    uvicorn_protocol_logger.setLevel(log_level)
 
 # Filter uvicorn.protocols.websockets.websockets_impl specifically
 uvicorn_websockets_impl_logger = logging.getLogger('uvicorn.protocols.websockets.websockets_impl')
-uvicorn_websockets_impl_logger.addFilter(WebSocketErrorFilter())
-uvicorn_websockets_impl_logger.setLevel(logging.CRITICAL + 1)  # Disable all logging
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    uvicorn_websockets_impl_logger.addFilter(WebSocketErrorFilter())
+    uvicorn_websockets_impl_logger.setLevel(logging.CRITICAL + 1)  # Disable all logging
+else:
+    uvicorn_websockets_impl_logger.setLevel(log_level)
 
 # Filter uvicorn.error logger which catches exceptions - be very aggressive
 uvicorn_error_logger = logging.getLogger('uvicorn.error')
-uvicorn_error_logger.addFilter(WebSocketErrorFilter())
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    uvicorn_error_logger.addFilter(WebSocketErrorFilter())
 
 # Also add a more aggressive filter that checks the entire traceback
 class AggressiveWebSocketFilter(logging.Filter):
@@ -209,7 +247,8 @@ class AggressiveWebSocketFilter(logging.Filter):
         return True
 
 # Apply aggressive filter to uvicorn.error which logs exceptions
-uvicorn_error_logger.addFilter(AggressiveWebSocketFilter())
+if _SUPPRESS_WEBSOCKET_LOG_NOISE:
+    uvicorn_error_logger.addFilter(AggressiveWebSocketFilter())
 
 # Also filter warnings module to catch deprecation warnings
 warnings_logger = logging.getLogger('py.warnings')

@@ -587,15 +587,18 @@ class RefereeDbCockroach(object):
                          date: str,
                          comments: str,
                          gameid: str) -> Tuple[bool, str]:
+        logging.info(f'Adding mentor session for *{mentee}* from *{mentor}* with no risky set')
         sql = 'INSERT INTO mentor_sessions (mentor, mentee, position, date, comments, gameid) \
                VALUES (%s, %s, %s, %s, %s, %s)'
         f, l = mentee.split(' ', 1)
+        logging.info(f"Referee first name: {f}, last name: {l}")
         mentorId = self.findMentor(mentor.split(' ')[0], mentor.split(' ')[1])
         menteeId = self.findReferee(l, f)
+        logging.info(f'Mentor ID: {mentorId}, Mentee ID: {menteeId}')
         if mentorId is None:
-            return (False, f'Could not find mentor details for {mentor}')
+            return (False, f'599: Could not find mentor details for {mentor}')
         if menteeId is None:
-            return (False, f'Could not find referee details for {mentee}')
+            return (False, f'601:Could not find referee details for {mentee}')
 
         dt = datetime.strptime(date, "%A, %B %d, %Y")
 
@@ -623,19 +626,25 @@ class RefereeDbCockroach(object):
                             isRisky: bool,
                             gameid: str) -> Tuple[bool, str]:
 
+
+        logging.info(f'Adding mentor session new for *{mentee}* from *{mentor}* with risky: {isRisky}')
         if not isRisky:
+            logging.info(f'Removing risky for {mentee}')
             self._removeRisky(mentee)
             return self.addMentorSession(mentor, mentee, position, date, comments, gameid)
 
+        logging.info(f'Adding mentor session for *{mentee}* from *{mentor}* with risky: {isRisky}')
         sql = 'INSERT INTO mentor_sessions (mentor, mentee, position, date, comments, gameid) \
                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id'
         f, l = mentee.split(' ', 1)
+        logging.info(f"Referee first name: {f}, last name: {l}")
         mentorId = self.findMentor(mentor.split(' ')[0], mentor.split(' ')[1])
         menteeId = self.findReferee(l, f)
+        logging.info(f'Mentor ID: {mentorId}, Mentee ID: {menteeId}')
         if mentorId is None:
-            return (False, f'Could not find mentor details for {mentor}')
+            return (False, f'645:Could not find mentor details for {mentor}')
         if menteeId is None:
-            return (False, f'Could not find referee details for {mentee}')
+            return (False, f'647:Could not find referee details for {mentee}')
 
         dt = datetime.strptime(date, "%A, %B %d, %Y")
 
