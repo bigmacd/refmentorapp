@@ -27,6 +27,15 @@ schema.min(10).max(100).has().uppercase().has().lowercase().has().digits().has()
 PASSWORD_REQUIREMENTS = "Minimum 10 characters. At least one uppercase letter, one lowercase letter, one digit, and one special character. No spaces."
 
 
+def _format_timestamp(ts) -> str:
+    """Format a timestamp for display in admin tables."""
+    if ts is None:
+        return 'Never'
+    if hasattr(ts, 'strftime'):
+        return ts.strftime('%Y-%m-%d %H:%M')
+    return str(ts)
+
+
 class AuthManager:
     """Handles user authentication and session management"""
 
@@ -240,6 +249,44 @@ def require_auth(auth_manager: AuthManager):
         ui.navigate.to('/login')
         return False
     return True
+
+
+def render_app_header(title: str = 'Referee Mentor System') -> None:
+    """Render the standard app header."""
+    with ui.header().classes('bg-blue-900 text-white'):
+        ui.label(f'🏆 {title}').classes('text-2xl font-bold')
+
+
+def render_user_sidebar(auth_manager: AuthManager, *, show_back_to_app: bool = False) -> None:
+    """Render the left drawer with user menu and admin links."""
+    drawer_kwargs = {'top_corner': True, 'bottom_corner': True}
+    if show_back_to_app:
+        drawer_kwargs['value'] = True
+    with ui.left_drawer(**drawer_kwargs).classes('p-4'):
+        if show_back_to_app:
+            ui.button('Back to App', on_click=lambda: ui.navigate.to('/')).classes('w-full mb-2').props('flat')
+            ui.separator().classes('my-2')
+
+        current_user = auth_manager.get_current_user()
+        if current_user:
+            ui.label('Logged in as:').classes('text-gray-600 text-sm')
+            ui.label(f'{current_user}').classes('font-bold mb-2')
+            user_role = auth_manager.get_user_role()
+            if user_role:
+                ui.label(f'Role: {user_role}').classes('text-gray-600 text-sm mb-4')
+
+        ui.separator()
+
+        ui.button('Change Password', on_click=lambda: ui.navigate.to('/change-password')).classes('w-full mt-4').props('flat')
+        ui.button('Logout', on_click=lambda: auth_manager.logout()).classes('w-full mt-2').props('flat color=red')
+
+        if auth_manager.is_admin():
+            ui.separator().classes('my-4')
+            ui.label('Admin Functions').classes('font-bold text-sm')
+            ui.button('User Management', on_click=lambda: ui.navigate.to('/admin/users')).classes('w-full mt-2').props('flat')
+            ui.button('User Activity', on_click=lambda: ui.navigate.to('/admin/user-activity')).classes('w-full mt-2').props('flat')
+
+        ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
 
 
 @ui.page('/login')
@@ -496,10 +543,11 @@ def user_management_page():
         ui.navigate.to('/')
         return
 
-    with ui.header().classes('bg-blue-900 text-white'):
-        ui.label('🏆 User Management').classes('text-2xl font-bold')
-        ui.space()
-        ui.button('Back to App', on_click=lambda: ui.navigate.to('/')).props('flat color=white')
+    ui.dark_mode(True)
+    render_app_header()
+    render_user_sidebar(auth_manager, show_back_to_app=True)
+
+    ui.label('User Management').classes('text-xl font-bold px-4 pt-4')
 
     with ui.tabs() as tabs:
         create_tab = ui.tab('Create User')
@@ -571,4 +619,81 @@ def user_management_page():
                     ui.table(columns=columns, rows=rows).classes('w-full')
                 else:
                     ui.label('No users found')
+
+
+@ui.page('/admin/user-activity')
+def user_activity_page():
+    """Recent login activity for users in the current organization (admin only)."""
+    auth_manager = AuthManager()
+
+    if not auth_manager.is_authenticated() or not auth_manager.is_admin():
+        ui.navigate.to('/')
+        return
+
+    org_id = auth_manager.get_current_organization_id()
+    org_name = auth_manager.get_current_organization_name()
+
+    ui.dark_mode(True)
+    render_app_header()
+    render_user_sidebar(auth_manager, show_back_to_app=True)
+
+    with ui.card().classes('w-full p-6'):
+        ui.label('User Activity').classes('text-xl font-bold mb-4')
+        if org_name:
+            ui.label(f'Organization: {org_name}').classes('text-gray-600 mb-4')
+        elif org_id is None:
+            ui.label('No organization selected for this session.').classes('text-orange-500 mb-4')
+            return
+
+        with ui.tabs() as tabs:
+            summary_tab = ui.tab('Last Login by User')
+            history_tab = ui.tab('Login History')
+
+        with ui.tab_panels(tabs, value=summary_tab).classes('w-full'):
+            with ui.tab_panel(summary_tab):
+                users = auth_manager.db.getUsersLastLoginByOrganization(org_id)
+                if users:
+                    columns = [
+                        {'name': 'username', 'label': 'Username', 'field': 'username', 'align': 'left'},
+                        {'name': 'email', 'label': 'Email', 'field': 'email', 'align': 'left'},
+                        {'name': 'role', 'label': 'Role', 'field': 'role', 'align': 'left'},
+                        {'name': 'last_login', 'label': 'Last Login', 'field': 'last_login', 'align': 'left'},
+                    ]
+                    rows = [
+                        {
+                            'username': u['username'],
+                            'email': u['email'],
+                            'role': u['role'],
+                            'last_login': _format_timestamp(u['last_login']),
+                        }
+                        for u in users
+                    ]
+                    ui.table(columns=columns, rows=rows, row_key='username').classes('w-full')
+                else:
+                    ui.label('No users found in this organization.')
+
+            with ui.tab_panel(history_tab):
+                logins = auth_manager.db.getRecentLoginsByOrganization(org_id)
+                if logins:
+                    columns = [
+                        {'name': 'login_time', 'label': 'Login Time', 'field': 'login_time', 'align': 'left'},
+                        {'name': 'username', 'label': 'Username', 'field': 'username', 'align': 'left'},
+                        {'name': 'email', 'label': 'Email', 'field': 'email', 'align': 'left'},
+                        {'name': 'role', 'label': 'Role', 'field': 'role', 'align': 'left'},
+                        {'name': 'ip_address', 'label': 'IP Address', 'field': 'ip_address', 'align': 'left'},
+                    ]
+                    rows = [
+                        {
+                            'id': i,
+                            'login_time': _format_timestamp(entry['login_time']),
+                            'username': entry['username'],
+                            'email': entry['email'],
+                            'role': entry['role'],
+                            'ip_address': entry['ip_address'],
+                        }
+                        for i, entry in enumerate(logins)
+                    ]
+                    ui.table(columns=columns, rows=rows, row_key='id').classes('w-full')
+                else:
+                    ui.label('No login history recorded for this organization.')
 

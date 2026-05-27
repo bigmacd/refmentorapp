@@ -20,6 +20,7 @@ from appState import AppState
 from calendar_tab import CalendarTab
 from excelWriter import getExcelFromText
 from mentor_game_selection import MentorGameSelection
+from auth_nicegui import render_user_sidebar
 
 logger = logging.getLogger(__name__)
 
@@ -196,27 +197,7 @@ def main_page():
     with ui.header().classes('bg-blue-900 text-white'):
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold')
 
-    # Left sidebar for user menu
-    with ui.left_drawer(top_corner=True, bottom_corner=True).classes('p-4'):
-        current_user = state.auth_manager.get_current_user()
-        if current_user:  # Only show if user is actually logged in
-            ui.label(f'Logged in as:').classes('text-gray-600 text-sm')
-            ui.label(f'{current_user}').classes('font-bold mb-2')
-            user_role = state.auth_manager.get_user_role()
-            if user_role:
-                ui.label(f'Role: {user_role}').classes('text-gray-600 text-sm mb-4')
-
-        ui.separator()
-
-        ui.button('Change Password', on_click=lambda: ui.navigate.to('/change-password')).classes('w-full mt-4').props('flat')
-        ui.button('Logout', on_click=lambda: state.auth_manager.logout()).classes('w-full mt-2').props('flat color=red')
-
-        if state.auth_manager.is_admin():
-            ui.separator().classes('my-4')
-            ui.label('Admin Functions').classes('font-bold text-sm')
-            ui.button('User Management', on_click=lambda: ui.navigate.to('/admin/users')).classes('w-full mt-2').props('flat')
-
-        ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
+    render_user_sidebar(state.auth_manager)
 
 
 
@@ -632,8 +613,8 @@ if __name__ in {"__main__", "__mp_main__"}:
 
     ui.run(
         title='Referee Mentor System',
-        port=443,
-        host='0.0.0.0',
+        port=port,
+        host=host,
         reload=False,
         show=False,
         dark=True,  # Force dark mode exclusively
