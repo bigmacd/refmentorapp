@@ -857,6 +857,47 @@ class RefereeDbCockroach(object):
             })
         return users
 
+    def getUsersLastLoginByOrganization(self, organization_id: int) -> list:
+        """Get users in an organization with their most recent login time."""
+        sql = """SELECT u.username, u.email, u.role, u.last_login
+                 FROM users u
+                 JOIN user_organizations uo ON u.id = uo.user_id
+                 WHERE uo.organization_id = %s
+                 ORDER BY u.last_login DESC NULLS LAST, u.username"""
+        self.executeSql(sql, (organization_id,))
+        rows = self.cursor.fetchall()
+        return [
+            {
+                'username': row[0],
+                'email': row[1],
+                'role': row[2],
+                'last_login': row[3],
+            }
+            for row in rows
+        ]
+
+    def getRecentLoginsByOrganization(self, organization_id: int, limit: int = 100) -> list:
+        """Get recent login events for users in an organization."""
+        sql = """SELECT uv.username, uv.email, uv.role, uv.date, uv.ip_address
+                 FROM user_visits uv
+                 JOIN users u ON LOWER(u.username) = LOWER(uv.username)
+                 JOIN user_organizations uo ON u.id = uo.user_id
+                 WHERE uo.organization_id = %s
+                 ORDER BY uv.date DESC
+                 LIMIT %s"""
+        self.executeSql(sql, (organization_id, limit))
+        rows = self.cursor.fetchall()
+        return [
+            {
+                'username': row[0],
+                'email': row[1],
+                'role': row[2],
+                'login_time': row[3],
+                'ip_address': row[4] or '',
+            }
+            for row in rows
+        ]
+
     def getOrganizations(self) -> list:
         """Get all organizations for multi-tenant login"""
         sql = "SELECT id, name, slug FROM organizations ORDER BY name"
