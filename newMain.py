@@ -97,6 +97,59 @@ def get_current_date_index(dates: list) -> int:
     return 0
 
 
+def render_landing_page():
+    """Render the public landing page for unauthenticated visitors."""
+    ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
+    ui.add_head_html('''
+    <style>
+        .landing-hero {
+            background: linear-gradient(135deg, #0f172a 0%, #1e40af 100%);
+        }
+        .landing-section {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 48px 24px;
+        }
+        .landing-card {
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+    </style>
+    ''')
+
+    with ui.header().classes('landing-hero text-white py-12'):
+        with ui.column().classes('w-full gap-6'):
+            with ui.row().classes('w-full justify-end gap-4 flex-wrap'):
+                ui.link('About Us', '#about-us').classes('text-sm text-blue-200 hover:text-white')
+                ui.link('How it Works', '#how-it-works').classes('text-sm text-blue-200 hover:text-white')
+                ui.link('Contact Us', '#contact-us').classes('text-sm text-blue-200 hover:text-white')
+                ui.link('Get Started', '#get-started').classes('text-sm text-blue-200 hover:text-white')
+                ui.link('Why choose this Tool?', '#why-choose').classes('text-sm text-blue-200 hover:text-white')
+                ui.link('Sign In', '/login').classes('text-sm text-blue-200 hover:text-white font-semibold')
+            with ui.column().classes():
+                ui.label('🏆 Referee Mentor System').classes('text-4xl font-bold')
+                #ui.label('A modern referee mentoring workspace for reports, workload, scheduling, and game selection.').classes('text-lg text-gray-200 max-w-3xl text-center')
+
+    with ui.column().classes('landing-section'):
+        with ui.column().classes('gap-8'):
+            with ui.card().props('id=about-us').classes('landing-card p-8'):
+                ui.label('About Us').classes('text-2xl font-bold text-white')
+                ui.label('We help referee mentors capture feedback, manage assignments, and track development through a simple, secure interface.').classes('text-gray-300 leading-relaxed')
+            with ui.row().classes('gap-6 flex-wrap'):
+                with ui.card().props('id=how-it-works').classes('landing-card p-8 w-full md:w-1/3'):
+                    ui.label('How it works').classes('text-xl font-semibold text-white')
+                    ui.label('Mentors select games, review referee performance, and submit reports from a streamlined dashboard.').classes('text-gray-300 mt-3')
+                with ui.card().props('id=contact-us').classes('landing-card p-8 w-full md:w-1/3'):
+                    ui.label('Contact Us').classes('text-xl font-semibold text-white')
+                    ui.label('Questions? Reach out via email or use the support link after signing in.').classes('text-gray-300 mt-3')
+                with ui.card().props('id=get-started').classes('landing-card p-8 w-full md:w-1/3'):
+                    ui.label('Get Started').classes('text-xl font-semibold text-white')
+                    ui.label('Click Sign In to view the mentor tools and start managing referee sessions.').classes('text-gray-300 mt-3')
+            with ui.card().props('id=why-choose').classes('landing-card p-8'):
+                ui.label('Why choose this tool?').classes('text-2xl font-bold text-white')
+                ui.label('Built specifically for referee mentoring, this platform combines reporting, schedule review, and workload insights in one place.').classes('text-gray-300 leading-relaxed')
+
+
 @ui.page('/')
 def main_page():
     ui.dark_mode(True)
@@ -104,17 +157,7 @@ def main_page():
     is_auth = state.auth_manager.is_authenticated()
 
     if not is_auth:
-        # Use meta refresh for immediate redirect (happens before page renders)
-        ui.add_head_html('''
-            <meta http-equiv="refresh" content="0; url=/login">
-            <script>
-                // Backup: immediate JavaScript redirect
-                if (window.location.pathname !== '/login') {
-                    window.location.replace('/login');
-                }
-            </script>
-        ''')
-        # Return immediately - don't create any UI
+        render_landing_page()
         return
 
     # Only proceed if authenticated - show loading state first
