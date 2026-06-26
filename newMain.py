@@ -106,48 +106,65 @@ def render_landing_page():
             background: linear-gradient(135deg, #0f172a 0%, #1e40af 100%);
         }
         .landing-section {
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 48px 24px;
         }
         .landing-card {
             background: rgba(15, 23, 42, 0.95);
             border: 1px solid rgba(255,255,255,0.08);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            /* max-width: 900px; */
+            width: 100%;
+            max-height: 420px;
+            min-height: 320px;
+            overflow: auto;
+            margin: 0 auto;
+        }
+        .landing-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+        }
+        .landing-nav a {
+            color: #93c5fd;
+            transition: color 0.2s ease;
+        }
+        .landing-nav a:hover {
+            color: white;
+        }
+        .landing-hero-panel {
+            background: rgba(15, 23, 42, 0.75);
+            border-radius: 24px;
+            border: 1px solid rgba(255,255,255,0.12);
+            padding: 32px;
         }
     </style>
     ''')
 
     with ui.header().classes('landing-hero text-white py-12'):
         with ui.column().classes('w-full gap-6'):
-            with ui.row().classes('w-full justify-end gap-4 flex-wrap'):
-                ui.link('About Us', '#about-us').classes('text-sm text-blue-200 hover:text-white')
-                ui.link('How it Works', '#how-it-works').classes('text-sm text-blue-200 hover:text-white')
-                ui.link('Contact Us', '#contact-us').classes('text-sm text-blue-200 hover:text-white')
-                ui.link('Get Started', '#get-started').classes('text-sm text-blue-200 hover:text-white')
-                ui.link('Why choose this Tool?', '#why-choose').classes('text-sm text-blue-200 hover:text-white')
-                ui.link('Sign In', '/login').classes('text-sm text-blue-200 hover:text-white font-semibold')
-            with ui.column().classes():
-                ui.label('🏆 Referee Mentor System').classes('text-4xl font-bold')
-                #ui.label('A modern referee mentoring workspace for reports, workload, scheduling, and game selection.').classes('text-lg text-gray-200 max-w-3xl text-center')
+            with ui.row().classes('w-full justify-end gap-4 landing-nav flex-wrap'):
+                 ui.link('Sign In', '/login').classes('text-sm text-blue-200 hover:text-white font-semibold')
+            with ui.card().classes('landing-hero-panel w-full'):
+                with ui.column().classes('gap-6'):
+                    ui.label('🏆 Referee Mentor System').classes('text-5xl font-bold')
 
-    with ui.column().classes('landing-section'):
-        with ui.column().classes('gap-8'):
-            with ui.card().props('id=about-us').classes('landing-card p-8'):
-                ui.label('About Us').classes('text-2xl font-bold text-white')
-                ui.label('We help referee mentors capture feedback, manage assignments, and track development through a simple, secure interface.').classes('text-gray-300 leading-relaxed')
-            with ui.row().classes('gap-6 flex-wrap'):
-                with ui.card().props('id=how-it-works').classes('landing-card p-8 w-full md:w-1/3'):
-                    ui.label('How it works').classes('text-xl font-semibold text-white')
-                    ui.label('Mentors select games, review referee performance, and submit reports from a streamlined dashboard.').classes('text-gray-300 mt-3')
-                with ui.card().props('id=contact-us').classes('landing-card p-8 w-full md:w-1/3'):
-                    ui.label('Contact Us').classes('text-xl font-semibold text-white')
-                    ui.label('Questions? Reach out via email or use the support link after signing in.').classes('text-gray-300 mt-3')
-                with ui.card().props('id=get-started').classes('landing-card p-8 w-full md:w-1/3'):
-                    ui.label('Get Started').classes('text-xl font-semibold text-white')
-                    ui.label('Click Sign In to view the mentor tools and start managing referee sessions.').classes('text-gray-300 mt-3')
-            with ui.card().props('id=why-choose').classes('landing-card p-8'):
-                ui.label('Why choose this tool?').classes('text-2xl font-bold text-white')
-                ui.label('Built specifically for referee mentoring, this platform combines reporting, schedule review, and workload insights in one place.').classes('text-gray-300 leading-relaxed')
+    with ui.column().classes('landing-section gap-6'):
+        with ui.card().props('id=about-us').classes('landing-card p-8'):
+            ui.label('About Us').classes('text-2xl font-bold text-white')
+            ui.label('We help referee mentors capture feedback, manage assignments, and track development through a guided, data-driven interface.').classes('text-gray-300 leading-relaxed mt-3')
+        with ui.card().props('id=why-choose').classes('landing-card p-8'):
+            ui.label('Why choose this tool?').classes('text-2xl font-bold text-white')
+            ui.label('Designed specifically for referee mentoring, the platform combines reporting, scheduling, and workload insights in one polished workspace.').classes('text-gray-300 leading-relaxed mt-3')
+        with ui.card().props('id=how-it-works').classes('landing-card p-8'):
+            ui.label('How it Works').classes('text-xl font-semibold text-white')
+            ui.label('Select games, review referee performance, and submit mentoring notes with a clear workflow.').classes('text-gray-300 mt-3')
+        with ui.card().props('id=get-started').classes('landing-card p-8'):
+            ui.label('Get Started').classes('text-xl font-semibold text-white')
+            ui.label('Sign in to immediately access mentor reports, schedules, and workload tracking.').classes('text-gray-300 mt-3')
+        with ui.card().props('id=contact-us').classes('landing-card p-8'):
+            ui.label('Contact Us').classes('text-xl font-semibold text-white')
+            ui.label('Need help? Reach out via email or use the support link once you’ve signed in to connect with the team.').classes('text-gray-300 mt-3')
 
 
 @ui.page('/')
