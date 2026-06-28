@@ -108,18 +108,36 @@ def render_landing_page():
         .landing-section {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 48px 24px;
+            padding: 0;
+        }
+        .landing-section > * {
+            min-height: calc(100vh - 10rem);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 2rem 1.5rem;
+            box-sizing: border-box;
+        }
+        .landing-video {
+            width: 100%;
+            min-height: calc(100vh - 10rem);
+            object-fit: cover;
+            border-radius: 1rem;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
         }
         .landing-card {
             background: rgba(15, 23, 42, 0.95);
             border: 1px solid rgba(255,255,255,0.08);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
-            /* max-width: 900px; */
             width: 100%;
-            max-height: 420px;
-            min-height: 320px;
-            overflow: auto;
+            max-height: none;
+            min-height: calc(100vh - 10rem);
+            overflow: hidden;
             margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         .landing-card:hover {
             transform: translateY(-4px);
@@ -150,6 +168,12 @@ def render_landing_page():
                     ui.label('🏆 Referee Mentor System').classes('text-5xl font-bold')
 
     with ui.column().classes('landing-section gap-6'):
+        with ui.video('/static/landing.mp4',
+                      controls=True,
+                      autoplay=True,
+                      loop=True,
+                      muted=True).classes('landing-video'):
+            pass
         with ui.card().props('id=about-us').classes('landing-card p-8'):
             ui.label('About Us').classes('text-2xl font-bold text-white')
             ui.label('We help referee mentors capture feedback, manage assignments, and track development through a guided, data-driven interface.').classes('text-gray-300 leading-relaxed mt-3')
