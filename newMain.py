@@ -165,7 +165,11 @@ def render_landing_page():
                  ui.link('Sign In', '/login').classes('text-sm text-blue-200 hover:text-white font-semibold')
             with ui.card().classes('landing-hero-panel w-full'):
                 with ui.column().classes('gap-6'):
-                    ui.label('🏆 Referee Mentor System').classes('text-5xl font-bold')
+                    with ui.column().classes('inline-block'):
+                        ui.label('🏆 Referee Mentor System').classes('text-5xl font-bold inline-block')
+                        ui.label('powered by Swynga LLC').classes('text-sm text-gray-300').style('display: block; width: 100%; text-align: right;')
+                    ui.label('A guided, data-driven interface for referee mentors to capture feedback, manage assignments, and track development.').classes('text-gray-300 text-lg leading-relaxed')
+                    ui.link('Learn More', '#about-us').classes('text-blue-400 hover:text-white font-semibold')
 
     with ui.column().classes('landing-section gap-6'):
         with ui.video('/static/landing.mp4',
@@ -176,7 +180,16 @@ def render_landing_page():
             pass
         with ui.card().props('id=about-us').classes('landing-card p-8'):
             ui.label('About Us').classes('text-2xl font-bold text-white')
-            ui.label('We help referee mentors capture feedback, manage assignments, and track development through a guided, data-driven interface.').classes('text-gray-300 leading-relaxed mt-3')
+            ui.markdown('''
+Swynga LLC created the Referee Mentor System to help mentors and referees improve performance through structured feedback, clear assignments, and meaningful progress tracking.
+
+- **Structured mentoring:** guided report forms, revisit tracking, and role-specific checklists to make mentoring consistent and actionable.
+- **Scheduling & assignments:** easy game selection and workload balancing so mentors can focus on teaching, not logistics.
+- **Insights & exports:** aggregated metrics, simple reports, and Excel exports to measure development over time.
+- **Privacy & security:** role-based access and secure storage keep referee data protected.
+
+Built in collaboration with referees and mentors, the platform is lightweight, practical, and focused on real-world improvement.
+''').classes('text-gray-300 leading-relaxed mt-3')
         with ui.card().props('id=why-choose').classes('landing-card p-8'):
             ui.label('Why choose this tool?').classes('text-2xl font-bold text-white')
             ui.label('Designed specifically for referee mentoring, the platform combines reporting, scheduling, and workload insights in one polished workspace.').classes('text-gray-300 leading-relaxed mt-3')
@@ -190,6 +203,8 @@ def render_landing_page():
             ui.label('Contact Us').classes('text-xl font-semibold text-white')
             ui.label('Need help? Reach out via email or use the support link once you’ve signed in to connect with the team.').classes('text-gray-300 mt-3')
 
+    with ui.footer().classes('bg-transparent text-center pt-6 pb-8'):
+        ui.label(f'© {dtime.now().year} Swynga LLC').classes('text-sm text-gray-400')
 
 @ui.page('/')
 def main_page():
