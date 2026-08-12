@@ -285,6 +285,7 @@ def render_user_sidebar(auth_manager: AuthManager, *, show_back_to_app: bool = F
             ui.label('Admin Functions').classes('font-bold text-sm')
             ui.button('User Management', on_click=lambda: ui.navigate.to('/admin/users')).classes('w-full mt-2').props('flat')
             ui.button('User Activity', on_click=lambda: ui.navigate.to('/admin/user-activity')).classes('w-full mt-2').props('flat')
+            ui.button('Organizations', on_click=lambda: ui.navigate.to('/admin/organizations')).classes('w-full mt-2').props('flat')
 
         ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
 
@@ -534,6 +535,24 @@ def change_password_page():
             ui.button('Cancel', on_click=lambda: ui.navigate.to('/')).props('color=grey')
 
 
+@ui.page('/admin/organizations')
+def organizations_page():
+    """Placeholder page for organization management (admin only)."""
+    auth_manager = AuthManager()
+
+    if not auth_manager.is_authenticated() or not auth_manager.is_admin():
+        ui.navigate.to('/')
+        return
+
+    ui.dark_mode(True)
+    render_app_header()
+    render_user_sidebar(auth_manager, show_back_to_app=True)
+
+    with ui.card().classes('w-full p-6'):
+        ui.label('Organizations').classes('text-xl font-bold mb-4')
+        ui.label('This page is a placeholder. Organization management will be added here.').classes('text-gray-400')
+
+
 @ui.page('/admin/users')
 def user_management_page():
     """User management page for admins"""
@@ -607,31 +626,53 @@ def user_management_page():
             with ui.card().classes('w-full p-6'):
                 ui.label('Current Users').classes('text-xl font-bold mb-4')
 
-                users = auth_manager.db.getAllUsers()
+                orgs = auth_manager.get_organizations()
+                org_options = {o['id']: o['name'] for o in orgs}
+                org_select = ui.select(
+                    options=org_options,
+                    label='Organization',
+                    value=None,
+                ).classes('w-full mb-4')
+                org_select.props('clearable')
 
-                if users:
-                    columns = [
-                        {'name': 'username', 'label': 'Username', 'field': 'username'},
-                        {'name': 'email', 'label': 'Email', 'field': 'email'},
-                        {'name': 'role', 'label': 'Role', 'field': 'role'},
-                    ]
-                    rows = [{'username': u['username'], 'email': u['email'], 'role': u['role']} for u in users]
-                    ui.table(columns=columns, rows=rows).classes('w-full')
-                else:
-                    ui.label('No users found')
+                users_area = ui.column().classes('w-full')
+                with users_area:
+                    ui.label('Select an organization to view its users.').classes('text-gray-400')
+
+                def render_users_for_org():
+                    users_area.clear()
+                    org_id = org_select.value
+                    with users_area:
+                        if org_id is None:
+                            ui.label('Select an organization to view its users.').classes('text-gray-400')
+                            return
+
+                        users = auth_manager.db.getUsersByOrganization(org_id)
+                        if users:
+                            columns = [
+                                {'name': 'username', 'label': 'Username', 'field': 'username'},
+                                {'name': 'email', 'label': 'Email', 'field': 'email'},
+                                {'name': 'role', 'label': 'Role', 'field': 'role'},
+                            ]
+                            rows = [
+                                {'username': u['username'], 'email': u['email'], 'role': u['role']}
+                                for u in users
+                            ]
+                            ui.table(columns=columns, rows=rows, row_key='username').classes('w-full')
+                        else:
+                            ui.label('No users found in this organization.')
+
+                org_select.on_value_change(lambda: render_users_for_org())
 
 
 @ui.page('/admin/user-activity')
 def user_activity_page():
-    """Recent login activity for users in the current organization (admin only)."""
+    """Recent login activity for users in a selected organization (admin only)."""
     auth_manager = AuthManager()
 
     if not auth_manager.is_authenticated() or not auth_manager.is_admin():
         ui.navigate.to('/')
         return
-
-    org_id = auth_manager.get_current_organization_id()
-    org_name = auth_manager.get_current_organization_name()
 
     ui.dark_mode(True)
     render_app_header()
@@ -639,61 +680,79 @@ def user_activity_page():
 
     with ui.card().classes('w-full p-6'):
         ui.label('User Activity').classes('text-xl font-bold mb-4')
-        if org_name:
-            ui.label(f'Organization: {org_name}').classes('text-gray-600 mb-4')
-        elif org_id is None:
-            ui.label('No organization selected for this session.').classes('text-orange-500 mb-4')
-            return
 
-        with ui.tabs() as tabs:
-            summary_tab = ui.tab('Last Login by User')
-            history_tab = ui.tab('Login History')
+        orgs = auth_manager.get_organizations()
+        org_options = {o['id']: o['name'] for o in orgs}
+        org_select = ui.select(
+            options=org_options,
+            label='Organization',
+            value=None,
+        ).classes('w-full mb-4')
+        org_select.props('clearable')
 
-        with ui.tab_panels(tabs, value=summary_tab).classes('w-full'):
-            with ui.tab_panel(summary_tab):
-                users = auth_manager.db.getUsersLastLoginByOrganization(org_id)
-                if users:
-                    columns = [
-                        {'name': 'username', 'label': 'Username', 'field': 'username', 'align': 'left'},
-                        {'name': 'email', 'label': 'Email', 'field': 'email', 'align': 'left'},
-                        {'name': 'role', 'label': 'Role', 'field': 'role', 'align': 'left'},
-                        {'name': 'last_login', 'label': 'Last Login', 'field': 'last_login', 'align': 'left'},
-                    ]
-                    rows = [
-                        {
-                            'username': u['username'],
-                            'email': u['email'],
-                            'role': u['role'],
-                            'last_login': _format_timestamp(u['last_login']),
-                        }
-                        for u in users
-                    ]
-                    ui.table(columns=columns, rows=rows, row_key='username').classes('w-full')
-                else:
-                    ui.label('No users found in this organization.')
+        activity_area = ui.column().classes('w-full')
+        with activity_area:
+            ui.label('Select an organization to view user activity.').classes('text-gray-400')
 
-            with ui.tab_panel(history_tab):
-                logins = auth_manager.db.getRecentLoginsByOrganization(org_id)
-                if logins:
-                    columns = [
-                        {'name': 'login_time', 'label': 'Login Time', 'field': 'login_time', 'align': 'left'},
-                        {'name': 'username', 'label': 'Username', 'field': 'username', 'align': 'left'},
-                        {'name': 'email', 'label': 'Email', 'field': 'email', 'align': 'left'},
-                        {'name': 'role', 'label': 'Role', 'field': 'role', 'align': 'left'},
-                        {'name': 'ip_address', 'label': 'IP Address', 'field': 'ip_address', 'align': 'left'},
-                    ]
-                    rows = [
-                        {
-                            'id': i,
-                            'login_time': _format_timestamp(entry['login_time']),
-                            'username': entry['username'],
-                            'email': entry['email'],
-                            'role': entry['role'],
-                            'ip_address': entry['ip_address'],
-                        }
-                        for i, entry in enumerate(logins)
-                    ]
-                    ui.table(columns=columns, rows=rows, row_key='id').classes('w-full')
-                else:
-                    ui.label('No login history recorded for this organization.')
+        def render_activity_for_org():
+            activity_area.clear()
+            org_id = org_select.value
+            with activity_area:
+                if org_id is None:
+                    ui.label('Select an organization to view user activity.').classes('text-gray-400')
+                    return
+
+                with ui.tabs() as tabs:
+                    summary_tab = ui.tab('Last Login by User')
+                    history_tab = ui.tab('Login History')
+
+                with ui.tab_panels(tabs, value=summary_tab).classes('w-full'):
+                    with ui.tab_panel(summary_tab):
+                        users = auth_manager.db.getUsersLastLoginByOrganization(org_id)
+                        if users:
+                            columns = [
+                                {'name': 'username', 'label': 'Username', 'field': 'username', 'align': 'left'},
+                                {'name': 'email', 'label': 'Email', 'field': 'email', 'align': 'left'},
+                                {'name': 'role', 'label': 'Role', 'field': 'role', 'align': 'left'},
+                                {'name': 'last_login', 'label': 'Last Login', 'field': 'last_login', 'align': 'left'},
+                            ]
+                            rows = [
+                                {
+                                    'username': u['username'],
+                                    'email': u['email'],
+                                    'role': u['role'],
+                                    'last_login': _format_timestamp(u['last_login']),
+                                }
+                                for u in users
+                            ]
+                            ui.table(columns=columns, rows=rows, row_key='username').classes('w-full')
+                        else:
+                            ui.label('No users found in this organization.')
+
+                    with ui.tab_panel(history_tab):
+                        logins = auth_manager.db.getRecentLoginsByOrganization(org_id)
+                        if logins:
+                            columns = [
+                                {'name': 'login_time', 'label': 'Login Time', 'field': 'login_time', 'align': 'left'},
+                                {'name': 'username', 'label': 'Username', 'field': 'username', 'align': 'left'},
+                                {'name': 'email', 'label': 'Email', 'field': 'email', 'align': 'left'},
+                                {'name': 'role', 'label': 'Role', 'field': 'role', 'align': 'left'},
+                                {'name': 'ip_address', 'label': 'IP Address', 'field': 'ip_address', 'align': 'left'},
+                            ]
+                            rows = [
+                                {
+                                    'id': i,
+                                    'login_time': _format_timestamp(entry['login_time']),
+                                    'username': entry['username'],
+                                    'email': entry['email'],
+                                    'role': entry['role'],
+                                    'ip_address': entry['ip_address'],
+                                }
+                                for i, entry in enumerate(logins)
+                            ]
+                            ui.table(columns=columns, rows=rows, row_key='id').classes('w-full')
+                        else:
+                            ui.label('No login history recorded for this organization.')
+
+        org_select.on_value_change(lambda: render_activity_for_org())
 

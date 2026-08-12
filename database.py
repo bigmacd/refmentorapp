@@ -879,6 +879,27 @@ class RefereeDbCockroach(object):
             })
         return users
 
+    def getUsersByOrganization(self, organization_id: int) -> list:
+        """Get users belonging to a specific organization."""
+        sql = """SELECT u.id, u.username, u.email, u.role, u.created_at, u.last_login
+                 FROM users u
+                 JOIN user_organizations uo ON u.id = uo.user_id
+                 WHERE uo.organization_id = %s
+                 ORDER BY u.username"""
+        self.executeSql(sql, (organization_id,))
+        rows = self.cursor.fetchall()
+        return [
+            {
+                'id': row[0],
+                'username': row[1],
+                'email': row[2],
+                'role': row[3],
+                'created_at': row[4],
+                'last_login': row[5],
+            }
+            for row in rows
+        ]
+
     def getUsersLastLoginByOrganization(self, organization_id: int) -> list:
         """Get users in an organization with their most recent login time."""
         sql = """SELECT u.username, u.email, u.role, u.last_login
