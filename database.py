@@ -272,12 +272,13 @@ class RefereeDbCockroach(object):
 
     def _createMentorGameSelectionsTable(self):
         sql = """CREATE TABLE mentor_game_selections (id SERIAL PRIMARY KEY,
-                                                      mentor_id INTEGER NOT NULL REFERENCES mentors(id),
+                                                      mentor_id INTEGER NOT NULL REFERENCES users(id),
                                                       game_date TEXT NOT NULL,
                                                       venue TEXT NOT NULL,
                                                       game_id TEXT NOT NULL,
+                                                      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
                                                       selected_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                                                      UNIQUE(mentor_id, game_date, venue, game_id))"""
+                                                      UNIQUE(organization_id, mentor_id, game_date, venue, game_id))"""
         self.executeSql(sql)
 
 
@@ -315,10 +316,17 @@ class RefereeDbCockroach(object):
 
 
     def _removeRisky(self, mentee: str):
-        f, l = mentee.split(' ', 1)
-        menteeId = self.findReferee(l, f)
-        sql = f"DELETE FROM risky WHERE mentee = '{menteeId}'"
-        self.executeSql(sql)
+        parts = mentee.strip().split(' ', 1)
+        if len(parts) < 2:
+            logging.warning(f"_removeRisky: could not parse mentee name '{mentee}'")
+            return
+        firstname, lastname = parts[0], parts[1]
+        mentee_row = self.findReferee(lastname, firstname)
+        if mentee_row is None:
+            logging.warning(f"_removeRisky: referee not found for '{mentee}'")
+            return
+        self.executeSql("DELETE FROM risky WHERE mentee = %s", (mentee_row[0],))
+        self.connection.commit()
 
 
     # finding stuff
@@ -350,15 +358,19 @@ class RefereeDbCockroach(object):
         return r.fetchall()
 
 
-    def refExists(self, lastname: str, firstname:str) -> bool:
-        sql = "SELECT id from referees where lastname = %s and firstname = %s"
-        r = self.executeSql(sql, (lastname.lower(), firstname.lower()))
+    def refExists(self, lastname: str, firstname: str, organization_id: int) -> bool:
+        sql = "SELECT id from referees where lastname = %s and firstname = %s and organization_id = %s"
+        r = self.executeSql(sql, (lastname.lower(), firstname.lower(), organization_id))
         return len(r.fetchall()) == 1
 
 
-    def findReferee(self, lastname: str, firstname: str) -> list:
-        sql = "SELECT * from referees where lastname = %s and firstname = %s"
-        r = self.executeSql(sql, (lastname.lower(), firstname.lower()))
+    def findReferee(self, lastname: str, firstname: str, organization_id: int = None) -> list:
+        if organization_id is None:
+            sql = "SELECT * from referees where lastname = %s and firstname = %s"
+            r = self.executeSql(sql, (lastname.lower(), firstname.lower()))
+        else:
+            sql = "SELECT * from referees where lastname = %s and firstname = %s and organization_id = %s"
+            r = self.executeSql(sql, (lastname.lower(), firstname.lower(), organization_id))
         return r.fetchone()
 
 
@@ -398,20 +410,25 @@ class RefereeDbCockroach(object):
         return r.fetchall()
 
 
-    def mentorExists(self, firstname: str, lastname:str) -> bool:
-        sql = "SELECT id from mentors where mentor_last_name = %s and mentor_first_name = %s"
+    def mentorExists(self, firstname: str, lastname: str) -> bool:
+        sql = "SELECT id FROM users WHERE LOWER(last_name) = %s AND LOWER(first_name) = %s"
         r = self.executeSql(sql, (lastname.lower(), firstname.lower()))
         return len(r.fetchall()) == 1
 
 
     def findMentor(self, firstname: str, lastname: str) -> list:
-        sql = "SELECT * from mentors where mentor_last_name = %s and mentor_first_name = %s"
+        """Mentors are application users (multi-tenant); id is users.id."""
+        sql = "SELECT * FROM users WHERE LOWER(last_name) = %s AND LOWER(first_name) = %s"
         r = self.executeSql(sql, (lastname.lower(), firstname.lower()))
         return r.fetchone()
 
 
     def getMentors(self) -> list:
-        sql = "SELECT mentor_first_name, mentor_last_name from mentors"
+        """Return mentor display names from users with first/last name set."""
+        sql = """SELECT first_name, last_name FROM users
+                 WHERE COALESCE(TRIM(first_name), '') <> ''
+                   AND COALESCE(TRIM(last_name), '') <> ''
+                 ORDER BY last_name, first_name"""
         r = self.executeSql(sql)
         return r.fetchall()
 
@@ -480,14 +497,10 @@ class RefereeDbCockroach(object):
     def getMentoringSessionDetails(self, year: int) -> dict:
 
         range = [f'{year}-01-01', f'{year}-12-31']
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name \
-              from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
-              where ms.date between '{range[0]}' and '{range[1]}' ORDER BY ms.date"
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name, \
+        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name, \
               gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level \
               from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
+              join referees r on ms.mentee = r.id left join users me on ms.mentor = me.id \
               left join gamedetails gd on ms.gameid = gd.gameid \
               where ms.date between '{range[0]}' and '{range[1]}' ORDER BY ms.date"
         r = self.executeSql(sql)
@@ -498,13 +511,9 @@ class RefereeDbCockroach(object):
         # week string is like "Friday, April 14, 2023"
         d = datetime.strptime(week, "%A, %B %d, %Y")
         dt = d.strftime("%Y-%m-%d")
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name \
-              from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
-              where ms.date = '{dt}'"
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name, \
+        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name, \
               gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
+              join referees r on ms.mentee = r.id left join users me on ms.mentor = me.id \
               left join gamedetails gd on ms.gameid = gd.gameid \
               where ms.date = '{dt}'"
         r = self.executeSql(sql)
@@ -514,14 +523,9 @@ class RefereeDbCockroach(object):
     def getMentoringsessionsForReferee(self, referee: str) -> dict:
         # referee string is like "Kate Curby"
         firstname, lastname = referee.split(' ', 1)
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name \
-              from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
-              where r.firstname = '{firstname.lower()}' and r.lastname = '{lastname.lower()}' \
-              order by ms.date"
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name, \
+        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name, \
               gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
+              join referees r on ms.mentee = r.id left join users me on ms.mentor = me.id \
               left join gamedetails gd on ms.gameid = gd.gameid \
               where r.firstname = '{firstname.lower()}' and r.lastname = '{lastname.lower()}' \
               order by ms.date"
@@ -532,16 +536,11 @@ class RefereeDbCockroach(object):
     def getMentoringsessionsForMentor(self, mentor: str) -> dict:
         # mentor string is like "David Helfgott"
         firstname, lastname = mentor.split(' ', 1)
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name \
-              from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
-              where me.mentor_first_name = '{firstname.lower()}' and me.mentor_last_name = '{lastname.lower()}' \
-              order by ms.date"
-        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.mentor_last_name, me.mentor_first_name, \
+        sql = f"select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name, \
               gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level from mentor_sessions ms \
-              join referees r on ms.mentee = r.id join mentors me on ms.mentor = me.id \
+              join referees r on ms.mentee = r.id join users me on ms.mentor = me.id \
               left join gamedetails gd on ms.gameid = gd.gameid \
-              where me.mentor_first_name = '{firstname.lower()}' and me.mentor_last_name = '{lastname.lower()}' \
+              where LOWER(me.first_name) = '{firstname.lower()}' and LOWER(me.last_name) = '{lastname.lower()}' \
               order by ms.date"
         r = self.executeSql(sql)
         return r.fetchall()
@@ -565,18 +564,17 @@ class RefereeDbCockroach(object):
         self.connection.commit()
 
 
-    def addReferee(self, lastname: str, firstname: str, year: int):
-        sql = "INSERT INTO referees (lastname, firstname, year_certified) \
-               VALUES (%s, %s, %s)"
-        self.executeSql(sql, (lastname, firstname, year))
+    def addReferee(self, lastname: str, firstname: str, year: int, organization_id: int):
+        sql = "INSERT INTO referees (lastname, firstname, year_certified, organization_id) \
+               VALUES (%s, %s, %s, %s)"
+        self.executeSql(sql, (lastname, firstname, year, organization_id))
         self.connection.commit()
 
 
     def addMentor(self, firstname: str, lastname: str) -> None:
-        sql = "INSERT INTO mentors (mentor_last_name, mentor_first_name) \
-               VALUES (%s, %s)"
-        self.executeSql(sql, (lastname, firstname))
-        self.connection.commit()
+        raise NotImplementedError(
+            "Mentors are application users now; create a user account instead of inserting into mentors"
+        )
 
 
     def addMentorSession(self,
@@ -695,10 +693,12 @@ class RefereeDbCockroach(object):
             if date not in sessionData: # session[3] is date
                 sessionData[date] = []
 
+            mentor_last = session[5].capitalize() if session[5] else 'Unknown'
+            mentor_first = session[6].capitalize() if session[6] else 'Mentor'
             entry = {
                     'ref': f'{session[0].capitalize()} {session[1].capitalize()}',
                     'position': session[2],
-                    'mentor': f'{session[6].capitalize()} {session[5].capitalize()}',
+                    'mentor': f'{mentor_first} {mentor_last}',
                     'comments': session[4],
                     'gameid': session[7],
                     'center': session[8],
@@ -760,16 +760,16 @@ class RefereeDbCockroach(object):
 
     # The below was added so we can also track the game details
 
-    def gameDetailsExist(self, gameId: str, date: str, time: str) -> bool:
-        sql = "SELECT * from gamedetails where gameId = %s and date = %s and time = %s"
+    def gameDetailsExist(self, gameId: str, date: str, time: str, organization_id: int) -> bool:
+        sql = "SELECT * from gamedetails where gameId = %s and date = %s and time = %s and organization_id = %s"
         try:
-            self.executeSql(sql, (gameId, date, time))
+            self.executeSql(sql, (gameId, date, time, organization_id))
         except Exception as ex:
             print(ex)
         return not self.cursor.fetchone() == None
 
 
-    def addGameDetails(self, currentGames: dict) -> None:
+    def addGameDetails(self, currentGames: dict, organization_id: int) -> None:
 
         sql = """insert into gamedetails (venue,
                                     gameId,
@@ -779,14 +779,15 @@ class RefereeDbCockroach(object):
                                     date,
                                     time,
                                     age,
-                                    level)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                                    level,
+                                    organization_id)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
 
         for venue, gameDetails in currentGames.items():
             for gameid, game in gameDetails.items():
                 if 'VENUE CONFLICT' in gameid:
                     gameid = gameid.replace('VENUE CONFLICT', '')
-                if self.gameDetailsExist(gameid, game['date'], game['gameTime']) is False:
+                if self.gameDetailsExist(gameid, game['date'], game['gameTime'], organization_id) is False:
                     self.executeSql(sql, (venue,
                                             gameid,
                                             game['Center'],
@@ -795,10 +796,31 @@ class RefereeDbCockroach(object):
                                             game['date'],
                                             game['gameTime'],
                                             game['age'],
-                                            game['level']))
+                                            game['level'],
+                                            organization_id))
 
 
-    # User management methods for authentication
+    def getDefaultOrganizationId(self) -> int:
+        """Resolve the default organization for background jobs / single-org flows.
+
+        Preference order:
+        1. ORGANIZATION_ID env var
+        2. org with slug 'default' or name 'Default'
+        3. first organization by name
+        """
+        env_org = os.environ.get('ORGANIZATION_ID')
+        if env_org:
+            return int(env_org)
+
+        orgs = self.getOrganizations()
+        if not orgs:
+            raise RuntimeError("No organizations found; create one before adding referees/games")
+
+        default_org = next(
+            (o for o in orgs if (o.get('slug') == 'default' or o.get('name') == 'Default')),
+            None,
+        )
+        return default_org['id'] if default_org else orgs[0]['id']
 
     def userExists(self, username: str) -> bool:
         """Check if a username already exists"""
@@ -1129,16 +1151,17 @@ class RefereeDbCockroach(object):
     # Mentor Game Selections methods
 
     def addMentorGameSelection(self, mentor_firstname: str, mentor_lastname: str, game_date: str,
-                               venue: str, game_id: str) -> Tuple[bool, str]:
+                               venue: str, game_id: str, organization_id: int = None) -> Tuple[bool, str]:
         """Add a mentor game selection. Returns (success, message)"""
         try:
             mentor = self.findMentor(mentor_firstname.lower(), mentor_lastname.lower())
             if not mentor:
                 return (False, f'Mentor not found: {mentor_firstname} {mentor_lastname}')
 
-            sql = """INSERT INTO mentor_game_selections (mentor_id, game_date, venue, game_id)
-                     VALUES (%s, %s, %s, %s)"""
-            self.executeSql(sql, (mentor[0], game_date, venue, game_id))
+            org_id = organization_id if organization_id is not None else self.getDefaultOrganizationId()
+            sql = """INSERT INTO mentor_game_selections (mentor_id, game_date, venue, game_id, organization_id)
+                     VALUES (%s, %s, %s, %s, %s)"""
+            self.executeSql(sql, (mentor[0], game_date, venue, game_id, org_id))
             self.connection.commit()
             return (True, "Game selection added successfully")
         except Exception as ex:
@@ -1167,16 +1190,16 @@ class RefereeDbCockroach(object):
     def getMentorGameSelections(self, game_date: str = None) -> list:
         """Get mentor game selections, optionally filtered by date"""
         if game_date:
-            sql = """SELECT m.mentor_first_name, m.mentor_last_name, mgs.game_date, mgs.venue, mgs.game_id, mgs.selected_at
+            sql = """SELECT u.first_name, u.last_name, mgs.game_date, mgs.venue, mgs.game_id, mgs.selected_at
                      FROM mentor_game_selections mgs
-                     JOIN mentors m ON mgs.mentor_id = m.id
+                     JOIN users u ON mgs.mentor_id = u.id
                      WHERE mgs.game_date = %s
                      ORDER BY mgs.selected_at"""
             self.executeSql(sql, (game_date,))
         else:
-            sql = """SELECT m.mentor_first_name, m.mentor_last_name, mgs.game_date, mgs.venue, mgs.game_id, mgs.selected_at
+            sql = """SELECT u.first_name, u.last_name, mgs.game_date, mgs.venue, mgs.game_id, mgs.selected_at
                      FROM mentor_game_selections mgs
-                     JOIN mentors m ON mgs.mentor_id = m.id
+                     JOIN users u ON mgs.mentor_id = u.id
                      ORDER BY mgs.game_date, mgs.selected_at"""
             self.executeSql(sql)
 
@@ -1211,9 +1234,9 @@ class RefereeDbCockroach(object):
 
     def getGameSelectionsByGame(self, game_date: str, venue: str, game_id: str) -> list:
         """Get all mentors who have selected a specific game"""
-        sql = """SELECT m.mentor_first_name, m.mentor_last_name
+        sql = """SELECT u.first_name, u.last_name
                  FROM mentor_game_selections mgs
-                 JOIN mentors m ON mgs.mentor_id = m.id
+                 JOIN users u ON mgs.mentor_id = u.id
                  WHERE mgs.game_date = %s AND mgs.venue = %s AND mgs.game_id = %s
                  ORDER BY mgs.selected_at"""
         self.executeSql(sql, (game_date, venue, game_id))

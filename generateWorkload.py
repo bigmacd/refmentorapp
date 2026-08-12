@@ -214,6 +214,8 @@ class WorkloadGenerator:
         with redirect_stdout(stdout_capture):
             # adding this line to try to fix the deployment on streamlit.app
             db = RefereeDbCockroach()
+            organization_id = db.getDefaultOrganizationId()
+            print(f"Using organization_id={organization_id} for workload generation")
 
             """
             Make sure database is up-to-date with VYS new referee spreadsheet
@@ -222,9 +224,9 @@ class WorkloadGenerator:
             # returns list of tuples (lastname, firstname, year_certified)
 
             for ref in latestRefsFromSpreadsheet:
-                if not db.refExists(ref[0], ref[1]):
+                if not db.refExists(ref[0], ref[1], organization_id):
                     print(f"{ref[1].capitalize()} {ref[0].capitalize()} not in database, adding")
-                    db.addReferee(ref[0], ref[1], ref[2])
+                    db.addReferee(ref[0], ref[1], ref[2], organization_id)
 
             """
             Retrieve referees from MSL
@@ -240,8 +242,8 @@ class WorkloadGenerator:
             # Update database with MSL referee list
             # """
             # for ref in allRefs:
-            #     if not db.refExists(ref[1], ref[0]):
-            #         print(f"missing ref: {ref[1]} {ref[0]}") #db.addReferee(ref[1], ref[0], 2000)
+            #     if not db.refExists(ref[1], ref[0], organization_id):
+            #         print(f"missing ref: {ref[1]} {ref[0]}") #db.addReferee(ref[1], ref[0], 2000, organization_id)
 
             """
             Verify new referees have the same first and last name in MSL.
@@ -255,7 +257,7 @@ class WorkloadGenerator:
 
             # get this week's current assignments
             current = getRealTimeCurrentRefAssignments(br)
-            db.addGameDetails(current)
+            db.addGameDetails(current, organization_id)
 
             # get list of already mentored referees
             mentored = getRefsAlreadyMentored()

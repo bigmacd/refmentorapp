@@ -353,9 +353,25 @@ def _build_mentor_report_form(container):
             form_state['current_match'] = current_match
 
             if current_match:
-                center_cb.text = f"Center: {current_match.get('Center', '--')}"
-                ar1_cb.text = f"AR1: {current_match.get('AR1', '--')}"
-                ar2_cb.text = f"AR2: {current_match.get('AR2', '--')}"
+                center_name = current_match.get('Center', '--')
+                ar1_name = current_match.get('AR1', '--')
+                ar2_name = current_match.get('AR2', '--')
+                center_cb.text = f"Center: {center_name}"
+                ar1_cb.text = f"AR1: {ar1_name}"
+                ar2_cb.text = f"AR2: {ar2_name}"
+
+                def _is_assignable(name: str) -> bool:
+                    return bool(name) and str(name).strip().lower() not in ('none', '(requested)', '--')
+
+                center_cb.disable() if not _is_assignable(center_name) else center_cb.enable()
+                ar1_cb.disable() if not _is_assignable(ar1_name) else ar1_cb.enable()
+                ar2_cb.disable() if not _is_assignable(ar2_name) else ar2_cb.enable()
+                if not _is_assignable(center_name):
+                    center_cb.value = False
+                if not _is_assignable(ar1_name):
+                    ar1_cb.value = False
+                if not _is_assignable(ar2_name):
+                    ar2_cb.value = False
 
         date_select.on_value_change(lambda: update_venues())
         venue_select.on_value_change(lambda: update_games())
@@ -386,6 +402,9 @@ def _build_mentor_report_form(container):
             for i, ref_selected in enumerate(refs):
                 if ref_selected:
                     ref_name = current_match[positions[i]]
+                    if not ref_name or str(ref_name).strip().lower() in ('none', '(requested)', '--'):
+                        ui.notify(f'No valid referee assigned for {positions[i]}', type='warning')
+                        continue
                     revisit = (positions[i] == "Center" and revisit_center.value) or \
                               (positions[i] == "AR1" and revisit_ar1.value) or \
                               (positions[i] == "AR2" and revisit_ar2.value)
