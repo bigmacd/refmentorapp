@@ -91,28 +91,38 @@ class AuthManager:
 
     def logout(self):
         """Logout the current user"""
-        app.storage.user.clear()
+        try:
+            app.storage.user.clear()
+        except RuntimeError:
+            pass
         ui.navigate.to('/login')
+
+    def _storage_get(self, key: str, default=None):
+        """Read session storage; returns default outside a browser request (e.g. background threads)."""
+        try:
+            return app.storage.user.get(key, default)
+        except RuntimeError:
+            return default
 
     def is_authenticated(self) -> bool:
         """Check if user is authenticated"""
-        return app.storage.user.get('authenticated', False)
+        return bool(self._storage_get('authenticated', False))
 
     def get_current_user(self) -> Optional[str]:
         """Get the current authenticated username"""
-        return app.storage.user.get('username')
+        return self._storage_get('username')
 
     def get_user_role(self) -> Optional[str]:
         """Get the current user's role"""
-        return app.storage.user.get('user_role')
+        return self._storage_get('user_role')
 
     def get_current_organization_id(self) -> Optional[int]:
         """Get the current user's organization id (multi-tenant)"""
-        return app.storage.user.get('organization_id')
+        return self._storage_get('organization_id')
 
     def get_current_organization_name(self) -> Optional[str]:
         """Get the current user's organization name (multi-tenant)"""
-        return app.storage.user.get('organization_name')
+        return self._storage_get('organization_name')
 
     def get_organizations(self) -> list:
         """Get all organizations for the login dropdown (multi-tenant)"""
@@ -120,10 +130,24 @@ class AuthManager:
 
     def is_admin(self) -> bool:
         """Check if current user is an admin"""
-        return app.storage.user.get('user_role') == 'admin'
+        return self._storage_get('user_role') == 'admin'
 
-    def create_user(self, username: str, password: str, email: str, role: str = 'user') -> Tuple[bool, str]:
-        """Create a new user account"""
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        email: str,
+        role: str = 'user',
+        organization_id: Optional[int] = None,
+    ) -> Tuple[bool, str]:
+        """Create a new user account and associate with an organization."""
+        if organization_id is None:
+            return False, "Organization is required"
+
+        org = self.db.getOrganizationById(organization_id)
+        if not org:
+            return False, "Invalid organization"
+
         if self.db.userExists(username):
             return False, "Username already exists"
 
@@ -136,12 +160,46 @@ class AuthManager:
             self.db.createUser(username, password_hash, salt, email, role)
             user = self.db.getUserByUsername(username)
             if user:
-                default_org = next((o for o in self.db.getOrganizations() if (o.get('slug') == 'default' or o.get('name') == 'Default')), None)
-                if default_org:
-                    self.db.addUserToOrganization(user['id'], default_org['id'])
-            return True, "User created successfully"
+                self.db.addUserToOrganization(user['id'], organization_id)
+            return True, f"User created successfully and added to {org['name']}"
         except Exception as e:
             return False, f"Error creating user: {str(e)}"
+
+    def create_organization(self, name: str, slug: str = None) -> Tuple[bool, str]:
+        return self.db.createOrganization(name, slug)
+
+    def delete_organization(self, organization_id: int) -> Tuple[bool, str]:
+        return self.db.deleteOrganization(organization_id)
+
+    def add_user_to_organization(self, user_id: int, organization_id: int) -> Tuple[bool, str]:
+        user = self.db.getUserById(user_id)
+        if not user:
+            return False, 'User not found'
+        org = self.db.getOrganizationById(organization_id)
+        if not org:
+            return False, 'Organization not found'
+        if self.db.userBelongsToOrganization(user_id, organization_id):
+            return False, f"{user['username']} is already in {org['name']}"
+        try:
+            self.db.addUserToOrganization(user_id, organization_id)
+            return True, f"Added {user['username']} to {org['name']}"
+        except Exception as e:
+            return False, f'Error adding user to organization: {e}'
+
+    def remove_user_from_organization(self, user_id: int, organization_id: int) -> Tuple[bool, str]:
+        return self.db.removeUserFromOrganization(user_id, organization_id)
+
+    def update_user_role(self, user_id: int, role: str) -> Tuple[bool, str]:
+        current_id = self._storage_get('user_id')
+        if current_id is not None and int(current_id) == int(user_id) and role != 'admin':
+            return False, 'You cannot remove your own admin role'
+        return self.db.updateUserRole(user_id, role)
+
+    def delete_user(self, user_id: int) -> Tuple[bool, str]:
+        current_id = self._storage_get('user_id')
+        if current_id is not None and int(current_id) == int(user_id):
+            return False, 'You cannot delete your own account'
+        return self.db.deleteUser(user_id)
 
     def change_password(self, username: str, old_password: str, new_password: str) -> Tuple[bool, str]:
         """Change user's password"""
@@ -273,7 +331,14 @@ def render_user_sidebar(auth_manager: AuthManager, *, show_back_to_app: bool = F
             ui.label(f'{current_user}').classes('font-bold mb-2')
             user_role = auth_manager.get_user_role()
             if user_role:
-                ui.label(f'Role: {user_role}').classes('text-gray-600 text-sm mb-4')
+                ui.label(f'Role: {user_role}').classes('text-gray-600 text-sm mb-2')
+            org_name = auth_manager.get_current_organization_name()
+            if org_name:
+                ui.label(f'Organization: {org_name}').classes('text-gray-600 text-sm mb-4')
+            elif auth_manager.get_current_organization_id() is not None:
+                ui.label('Organization: (unknown)').classes('text-gray-600 text-sm mb-4')
+            else:
+                ui.label('Organization: not set').classes('text-gray-600 text-sm mb-4')
 
         ui.separator()
 
@@ -537,7 +602,7 @@ def change_password_page():
 
 @ui.page('/admin/organizations')
 def organizations_page():
-    """Placeholder page for organization management (admin only)."""
+    """Organization management (admin only)."""
     auth_manager = AuthManager()
 
     if not auth_manager.is_authenticated() or not auth_manager.is_admin():
@@ -550,7 +615,89 @@ def organizations_page():
 
     with ui.card().classes('w-full p-6'):
         ui.label('Organizations').classes('text-xl font-bold mb-4')
-        ui.label('This page is a placeholder. Organization management will be added here.').classes('text-gray-400')
+
+        org_list_area = ui.column().classes('w-full mb-6')
+        message_area = ui.column().classes('w-full mb-4')
+
+        def render_org_list():
+            org_list_area.clear()
+            orgs = auth_manager.get_organizations()
+            counts_by_org = {
+                o['id']: auth_manager.db.getOrganizationDependencyCounts(o['id'])
+                for o in orgs
+            }
+
+            with org_list_area:
+                if not orgs:
+                    ui.label('No organizations yet. Create one below.').classes('text-gray-400')
+                    return
+
+                with ui.row().classes('w-full font-bold text-sm text-gray-400 px-2 pb-2'):
+                    ui.label('Name').classes('flex-[2]')
+                    ui.label('Slug').classes('flex-1')
+                    ui.label('Users').classes('w-16')
+                    ui.label('Referees').classes('w-20')
+                    ui.label('').classes('w-24')
+
+                for org in orgs:
+                    counts = counts_by_org.get(org['id'], {})
+
+                    def make_delete_handler(org_id: int, org_name: str):
+                        def confirm_delete():
+                            with ui.dialog() as dialog, ui.card():
+                                ui.label(f'Delete organization "{org_name}"?').classes('text-lg font-bold')
+                                ui.label(
+                                    'User memberships and game selections for this org will be removed. '
+                                    'Deletion is blocked if the org still has referees or game details.'
+                                ).classes('text-sm text-gray-400 mb-4')
+
+                                with ui.row().classes('w-full justify-end gap-2'):
+                                    ui.button('Cancel', on_click=dialog.close).props('flat')
+
+                                    def do_delete(org_id=org_id):
+                                        success, message = auth_manager.delete_organization(org_id)
+                                        dialog.close()
+                                        message_area.clear()
+                                        with message_area:
+                                            ui.label(message).classes('text-green-500' if success else 'text-red-500')
+                                        if success:
+                                            render_org_list()
+
+                                    ui.button('Delete', on_click=do_delete).props('color=negative')
+
+                            dialog.open()
+
+                        return confirm_delete
+
+                    with ui.row().classes('w-full items-center gap-2 py-2 border-b border-gray-700 px-2'):
+                        ui.label(org['name']).classes('flex-[2]')
+                        ui.label(org['slug'] or '—').classes('flex-1 text-gray-400')
+                        ui.label(str(counts.get('users', 0))).classes('w-16')
+                        ui.label(str(counts.get('referees', 0))).classes('w-20')
+                        ui.button('Delete', on_click=make_delete_handler(org['id'], org['name'])).props(
+                            'flat dense color=negative'
+                        ).classes('w-24')
+
+        render_org_list()
+
+        ui.separator().classes('my-4')
+        ui.label('Add Organization').classes('text-lg font-bold mb-2')
+
+        new_name = ui.input('Organization name').classes('w-full max-w-md')
+        new_slug = ui.input('Slug (optional)').classes('w-full max-w-md')
+        new_slug.props('placeholder="auto-generated from name if blank"')
+
+        def add_organization():
+            message_area.clear()
+            success, message = auth_manager.create_organization(new_name.value, new_slug.value or None)
+            with message_area:
+                ui.label(message).classes('text-green-500' if success else 'text-red-500')
+            if success:
+                new_name.value = ''
+                new_slug.value = ''
+                render_org_list()
+
+        ui.button('Create Organization', on_click=add_organization).props('color=primary')
 
 
 @ui.page('/admin/users')
@@ -583,6 +730,17 @@ def user_management_page():
                 confirm_password = ui.input('Confirm Password', password=True).classes('w-full')
                 new_role = ui.select(['user', 'admin'], value='user', label='Role').classes('w-full')
 
+                orgs = auth_manager.get_organizations()
+                org_options = {o['id']: o['name'] for o in orgs}
+                new_org = ui.select(
+                    options=org_options,
+                    label='Organization',
+                    value=next(iter(org_options)) if org_options else None,
+                ).classes('w-full')
+                if not org_options:
+                    new_org.disable()
+                    ui.label('Create an organization first (Admin → Organizations).').classes('text-orange-400 text-sm')
+
                 message_area = ui.column().classes('w-full')
 
                 def create_user():
@@ -591,6 +749,11 @@ def user_management_page():
                     if not all([new_username.value, new_email.value, new_password.value, confirm_password.value]):
                         with message_area:
                             ui.label('All fields are required').classes('text-red-500')
+                        return
+
+                    if new_org.value is None:
+                        with message_area:
+                            ui.label('Organization is required').classes('text-red-500')
                         return
 
                     if not schema.validate(new_password.value):
@@ -607,7 +770,8 @@ def user_management_page():
                         new_username.value,
                         new_password.value,
                         new_email.value,
-                        new_role.value
+                        new_role.value,
+                        organization_id=new_org.value,
                     )
 
                     with message_area:
@@ -630,14 +794,145 @@ def user_management_page():
                 org_options = {o['id']: o['name'] for o in orgs}
                 org_select = ui.select(
                     options=org_options,
-                    label='Organization',
+                    label='Filter by organization',
                     value=None,
                 ).classes('w-full mb-4')
                 org_select.props('clearable')
 
+                manage_message = ui.column().classes('w-full mb-2')
                 users_area = ui.column().classes('w-full')
                 with users_area:
                     ui.label('Select an organization to view its users.').classes('text-gray-400')
+
+                def open_edit_user_dialog(user: dict, filter_org_id):
+                    user_orgs = auth_manager.db.getOrganizationsForUser(user['id'])
+                    all_orgs = auth_manager.get_organizations()
+                    member_ids = {o['id'] for o in user_orgs}
+                    addable = {o['id']: o['name'] for o in all_orgs if o['id'] not in member_ids}
+
+                    with ui.dialog() as dialog, ui.card().classes('w-full max-w-lg p-4'):
+                        ui.label(f"Edit user: {user['username']}").classes('text-xl font-bold mb-1')
+                        ui.label(user['email']).classes('text-sm text-gray-400 mb-4')
+
+                        edit_message = ui.column().classes('w-full mb-2')
+                        membership_area = ui.column().classes('w-full mb-4')
+
+                        role_select = ui.select(
+                            ['user', 'admin'],
+                            value=user['role'],
+                            label='Role',
+                        ).classes('w-full mb-4')
+
+                        def refresh_memberships():
+                            membership_area.clear()
+                            current_orgs = auth_manager.db.getOrganizationsForUser(user['id'])
+                            with membership_area:
+                                ui.label('Organizations').classes('font-semibold mb-2')
+                                if not current_orgs:
+                                    ui.label('Not a member of any organization.').classes('text-gray-400 text-sm')
+                                for org in current_orgs:
+                                    with ui.row().classes('w-full items-center justify-between py-1'):
+                                        ui.label(org['name'])
+
+                                        def make_remove(org_id: int, org_name: str):
+                                            def do_remove():
+                                                edit_message.clear()
+                                                success, message = auth_manager.remove_user_from_organization(
+                                                    user['id'], org_id
+                                                )
+                                                with edit_message:
+                                                    ui.label(message).classes(
+                                                        'text-green-500' if success else 'text-red-500'
+                                                    )
+                                                if success:
+                                                    refresh_memberships()
+                                                    refresh_add_options()
+                                                    render_users_for_org()
+                                            return do_remove
+
+                                        ui.button(
+                                            'Remove',
+                                            on_click=make_remove(org['id'], org['name']),
+                                        ).props('flat dense color=negative')
+
+                        def refresh_add_options():
+                            current_ids = {
+                                o['id'] for o in auth_manager.db.getOrganizationsForUser(user['id'])
+                            }
+                            add_org_select.options = {
+                                o['id']: o['name']
+                                for o in auth_manager.get_organizations()
+                                if o['id'] not in current_ids
+                            }
+                            add_org_select.value = None
+                            add_org_select.update()
+
+                        refresh_memberships()
+
+                        ui.label('Add to organization').classes('font-semibold mb-2')
+                        add_org_select = ui.select(
+                            options=addable,
+                            label='Organization',
+                            value=None,
+                        ).classes('w-full mb-2')
+                        add_org_select.props('clearable')
+
+                        def do_add_org():
+                            edit_message.clear()
+                            if add_org_select.value is None:
+                                with edit_message:
+                                    ui.label('Select an organization to add').classes('text-red-500')
+                                return
+                            success, message = auth_manager.add_user_to_organization(
+                                user['id'], add_org_select.value
+                            )
+                            with edit_message:
+                                ui.label(message).classes('text-green-500' if success else 'text-red-500')
+                            if success:
+                                refresh_memberships()
+                                refresh_add_options()
+                                render_users_for_org()
+
+                        ui.button('Add to organization', on_click=do_add_org).props('color=primary').classes('mb-4')
+
+                        def do_save_role():
+                            edit_message.clear()
+                            success, message = auth_manager.update_user_role(user['id'], role_select.value)
+                            with edit_message:
+                                ui.label(message).classes('text-green-500' if success else 'text-red-500')
+                            if success:
+                                user['role'] = role_select.value
+                                render_users_for_org()
+
+                        with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                            ui.button('Save role', on_click=do_save_role).props('color=primary')
+                            ui.button('Close', on_click=dialog.close).props('flat')
+
+                    dialog.open()
+
+                def open_delete_user_dialog(user: dict):
+                    with ui.dialog() as dialog, ui.card().classes('p-4'):
+                        ui.label(f'Delete user "{user["username"]}"?').classes('text-lg font-bold')
+                        ui.label(
+                            'This permanently deletes the account and organization memberships. '
+                            'It may fail if the user still has mentor sessions or game selections.'
+                        ).classes('text-sm text-gray-400 mb-4')
+
+                        with ui.row().classes('w-full justify-end gap-2'):
+                            ui.button('Cancel', on_click=dialog.close).props('flat')
+
+                            def do_delete():
+                                manage_message.clear()
+                                success, message = auth_manager.delete_user(user['id'])
+                                dialog.close()
+                                with manage_message:
+                                    ui.label(message).classes('text-green-500' if success else 'text-red-500')
+                                if success:
+                                    render_users_for_org()
+
+                            ui.button('Delete', on_click=do_delete).props('color=negative')
+
+                    dialog.open()
 
                 def render_users_for_org():
                     users_area.clear()
@@ -648,19 +943,32 @@ def user_management_page():
                             return
 
                         users = auth_manager.db.getUsersByOrganization(org_id)
-                        if users:
-                            columns = [
-                                {'name': 'username', 'label': 'Username', 'field': 'username'},
-                                {'name': 'email', 'label': 'Email', 'field': 'email'},
-                                {'name': 'role', 'label': 'Role', 'field': 'role'},
-                            ]
-                            rows = [
-                                {'username': u['username'], 'email': u['email'], 'role': u['role']}
-                                for u in users
-                            ]
-                            ui.table(columns=columns, rows=rows, row_key='username').classes('w-full')
-                        else:
+                        if not users:
                             ui.label('No users found in this organization.')
+                            return
+
+                        with ui.row().classes('w-full font-bold text-sm text-gray-400 px-2 pb-2'):
+                            ui.label('Username').classes('flex-1')
+                            ui.label('Email').classes('flex-[2]')
+                            ui.label('Role').classes('w-20')
+                            ui.label('').classes('w-40')
+
+                        for user in users:
+                            with ui.row().classes(
+                                'w-full items-center gap-2 py-2 border-b border-gray-700 px-2'
+                            ):
+                                ui.label(user['username']).classes('flex-1')
+                                ui.label(user['email']).classes('flex-[2] text-gray-300')
+                                ui.label(user['role']).classes('w-20')
+                                with ui.row().classes('w-40 gap-1 justify-end'):
+                                    ui.button(
+                                        'Edit',
+                                        on_click=lambda u=user: open_edit_user_dialog(u, org_id),
+                                    ).props('flat dense color=primary')
+                                    ui.button(
+                                        'Delete',
+                                        on_click=lambda u=user: open_delete_user_dialog(u),
+                                    ).props('flat dense color=negative')
 
                 org_select.on_value_change(lambda: render_users_for_org())
 

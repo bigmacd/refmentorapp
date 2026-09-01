@@ -1,19 +1,18 @@
-import mechanicalsoup
 import logging
 import os
-from typing import Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Optional
 
-from refWebSites import MySoccerLeague
+from assignment_providers import get_workload_config, get_assignment_provider
+from database import RefereeDbCockroach
 
 logger = logging.getLogger(__name__)
 
 
 class UIData:
     """
-    Singleton class for managing UI data from MySoccerLeague.
-    Ensures data is only fetched once and reused across the application.
-    Automatically refreshes data when it becomes stale (default: 2 hours).
+    Singleton cache for season match schedule data, keyed by organization_id.
+    Fetches through the assignment provider layer (MSL for VYS, etc.).
     """
     _instance: Optional['UIData'] = None
     _initialized: bool = False
@@ -24,21 +23,13 @@ class UIData:
         return cls._instance
 
     def __init__(self, ttl_hours: int = 2):
-        """
-        Initialize the singleton instance.
-
-        Args:
-            ttl_hours: Time-to-live in hours before data is considered stale (default: 2)
-        """
         if not self._initialized:
-            self.allMatchData: Optional[dict] = None
-            self.dates: Optional[list] = None
-            self._last_fetch_time: Optional[datetime] = None
+            # org_id -> {'data': dict, 'fetched_at': datetime}
+            self._cache: dict[int, dict] = {}
             self._ttl_seconds: int = ttl_hours * 3600
             self._process_id: int = os.getpid()
             self._initialized = True
 
-            # Log process info and warn about multi-worker scenarios
             web_concurrency = os.environ.get('WEB_CONCURRENCY')
             if web_concurrency and int(web_concurrency) > 1:
                 logger.warning(
@@ -49,121 +40,102 @@ class UIData:
             else:
                 logger.info(f"UIData singleton initialized in process PID: {self._process_id}")
 
-    def _is_stale(self) -> bool:
-        """Check if the cached data is stale based on TTL."""
-        if self._last_fetch_time is None:
+    def _is_stale(self, organization_id: int) -> bool:
+        entry = self._cache.get(organization_id)
+        if not entry or entry.get('fetched_at') is None:
             return True
-        elapsed = (datetime.now() - self._last_fetch_time).total_seconds()
+        elapsed = (datetime.now() - entry['fetched_at']).total_seconds()
         return elapsed >= self._ttl_seconds
 
-    def _fetch_data(self) -> None:
-        """Internal method to fetch data from MySoccerLeague."""
+    def _fetch_data(self, organization_id: int) -> dict:
+        db = RefereeDbCockroach()
+        org = db.getOrganizationById(organization_id)
+        if not org:
+            raise ValueError(f'Organization id {organization_id} not found')
+
+        config = get_workload_config(org)
+        provider = get_assignment_provider(config)
+        if provider is None:
+            logger.warning(
+                'No assignment provider for org %s (%s); returning empty match schedule',
+                organization_id,
+                org.get('name'),
+            )
+            empty = {}
+            self._cache[organization_id] = {'data': empty, 'fetched_at': datetime.now()}
+            return empty
+
+        logger.info(
+            'Fetching season match schedule for org %s (%s) via provider=%s',
+            organization_id,
+            org.get('name'),
+            config.provider,
+        )
         try:
-            logger.info("[FETCH_DATA] Starting data fetch from MySoccerLeague")
-            logger.info("[FETCH_DATA] Step 1: Creating StatefulBrowser instance")
-            br = mechanicalsoup.StatefulBrowser(soup_config={'features': 'lxml'})
-            br.addheaders = [('User-agent', 'Chrome')]
-            logger.info("[FETCH_DATA] Step 1: Browser instance created successfully")
-
-            logger.info("[FETCH_DATA] Step 2: Initializing MySoccerLeague (this includes login)")
-            try:
-                site = MySoccerLeague(br)
-                logger.info("[FETCH_DATA] Step 2: MySoccerLeague initialized successfully")
-            except Exception as e:
-                logger.error(f"[FETCH_DATA] Step 2 FAILED: Error initializing MySoccerLeague: {e}", exc_info=True)
-                raise
-
-            logger.info("[FETCH_DATA] Step 3: Calling getAllDatesForSeason()")
-            try:
-                self.dates = site.getAllDatesForSeason()
-                logger.info(f"[FETCH_DATA] Step 3: Successfully retrieved {len(self.dates) if self.dates else 0} dates")
-            except Exception as e:
-                logger.error(f"[FETCH_DATA] Step 3 FAILED: Error in getAllDatesForSeason(): {e}", exc_info=True)
-                raise
-
-            logger.info("[FETCH_DATA] Step 4: Starting to fetch matches for each date")
-            self.allMatchData = {}
-            total_dates = len(self.dates) if self.dates else 0
-            for idx, date_str in enumerate(self.dates or [], 1):
-                logger.info(f"[FETCH_DATA] Step 4.{idx}/{total_dates}: Getting matches for date: {date_str}")
-                try:
-                    start_time = datetime.now()
-                    self.allMatchData[date_str] = site.getMatches(date_str)
-                    elapsed = (datetime.now() - start_time).total_seconds()
-                    num_matches = len(self.allMatchData[date_str]) if self.allMatchData[date_str] else 0
-                    logger.info(f"[FETCH_DATA] Step 4.{idx}/{total_dates}: Successfully got {num_matches} matches for {date_str} (took {elapsed:.2f}s)")
-                except Exception as e:
-                    logger.error(f"[FETCH_DATA] Step 4.{idx}/{total_dates} FAILED: Error getting matches for {date_str}: {e}", exc_info=True)
-                    # Continue with other dates but log the error
-                    self.allMatchData[date_str] = {}
-
-            self._last_fetch_time = datetime.now()
-            logger.info(f"[FETCH_DATA] COMPLETE: Successfully fetched match data at {self._last_fetch_time}")
-
-        except RuntimeError as e:
-            logger.error(f"[FETCH_DATA] FAILED: RuntimeError during data fetch: {e}", exc_info=True)
+            data = provider.get_season_match_schedule()
+            self._cache[organization_id] = {'data': data, 'fetched_at': datetime.now()}
+            logger.info(
+                'Fetched match schedule for org %s: %s dates',
+                organization_id,
+                len(data) if data else 0,
+            )
+            return data
+        except RuntimeError:
             raise
         except Exception as e:
-            logger.error(f"[FETCH_DATA] FAILED: Unexpected error during data fetch: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to retrieve match data from MySoccerLeague: {e}") from e
+            logger.error('Failed to fetch match schedule for org %s: %s', organization_id, e, exc_info=True)
+            raise RuntimeError(
+                f"Failed to retrieve match data for organization {org.get('name')}: {e}"
+            ) from e
 
-    def getAllData(self, force_refresh: bool = False) -> dict:
+    def getAllData(self, organization_id: int, force_refresh: bool = False) -> dict:
         """
-        Get all match data. Initializes or refreshes data if stale or forced.
+        Get season match schedule for an organization.
 
         Args:
+            organization_id: Organization whose provider supplies the schedule
             force_refresh: If True, bypass cache and fetch fresh data
-
-        Returns:
-            dict: Dictionary mapping dates to match data
         """
-        if force_refresh or self.allMatchData is None or self._is_stale():
-            self._fetch_data()
-        return self.allMatchData
+        if force_refresh or self._is_stale(organization_id):
+            return self._fetch_data(organization_id)
+        return self._cache[organization_id]['data']
 
-    def refresh(self) -> dict:
-        """
-        Explicitly refresh the data, bypassing the cache.
-        Useful for scheduled refreshes or manual updates.
+    def refresh(self, organization_id: int) -> dict:
+        return self.getAllData(organization_id, force_refresh=True)
 
-        Returns:
-            dict: Freshly fetched dictionary mapping dates to match data
-        """
-        return self.getAllData(force_refresh=True)
+    def get_last_fetch_time(self, organization_id: int = None) -> Optional[datetime]:
+        if organization_id is None:
+            if not self._cache:
+                return None
+            return max(
+                (e['fetched_at'] for e in self._cache.values() if e.get('fetched_at')),
+                default=None,
+            )
+        entry = self._cache.get(organization_id)
+        return entry['fetched_at'] if entry else None
 
-    def get_last_fetch_time(self) -> Optional[datetime]:
-        """
-        Get the timestamp of when data was last fetched.
-
-        Returns:
-            datetime or None if data has never been fetched
-        """
-        return self._last_fetch_time
+    def clear_cache(self, organization_id: int = None) -> None:
+        if organization_id is None:
+            self._cache.clear()
+        else:
+            self._cache.pop(organization_id, None)
 
     def get_process_info(self) -> dict:
-        """
-        Get diagnostic information about the process running this singleton.
-        Useful for debugging multi-worker scenarios.
-
-        Returns:
-            dict: Process information including PID and worker count hints
-        """
         web_concurrency = os.environ.get('WEB_CONCURRENCY')
         return {
             'process_id': self._process_id,
             'web_concurrency_env': web_concurrency,
             'estimated_workers': int(web_concurrency) if web_concurrency else 1,
-            'note': 'Each uvicorn worker is a separate process with its own singleton instance'
+            'cached_orgs': list(self._cache.keys()),
+            'note': 'Each uvicorn worker is a separate process with its own singleton instance',
         }
 
 
-# Convenience function for backward compatibility
-def getAllData(force_refresh: bool = False) -> dict:
+def getAllData(organization_id: int = None, force_refresh: bool = False) -> dict:
     """
-    Convenience function that returns data from the singleton instance.
-    Maintains backward compatibility with existing code.
-
-    Args:
-        force_refresh: If True, bypass cache and fetch fresh data
+    Convenience wrapper. If organization_id is omitted, uses the default org
+    (ORGANIZATION_ID env / Default / first org) for background startup.
     """
-    return UIData().getAllData(force_refresh=force_refresh)
+    if organization_id is None:
+        organization_id = RefereeDbCockroach().getDefaultOrganizationId()
+    return UIData().getAllData(organization_id, force_refresh=force_refresh)

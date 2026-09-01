@@ -14,7 +14,9 @@ from nicegui import ui
 class MentorGameSelection:
     """Component for mentors to select games they want to mentor"""
 
-    def __init__(self, db, auth_manager, all_match_data, dates, logger=None, get_match_data: Optional[Callable[[], Tuple[Any, list]]] = None):
+    def __init__(self, db, auth_manager, all_match_data, dates, logger=None,
+                 get_match_data: Optional[Callable[[], Tuple[Any, list]]] = None,
+                 ensure_workload: Optional[Callable[[], None]] = None):
         """
         Initialize the mentor game selection component
 
@@ -31,9 +33,16 @@ class MentorGameSelection:
         self.all_match_data = all_match_data
         self.dates = dates
         self.get_match_data = get_match_data
+        self.ensure_workload = ensure_workload
         self.logger = logger or logging.getLogger(__name__)
         self.current_user = None
         self.current_mentor_name = None
+
+    def _current_org_id(self) -> int:
+        org_id = self.auth_manager.get_current_organization_id()
+        if org_id is not None:
+            return org_id
+        return self.db.getDefaultOrganizationId()
 
     def _get_weekend_dates(self):
         """Filter dates to show only Friday, Saturday, Sunday"""
@@ -45,7 +54,7 @@ class MentorGameSelection:
 
     def _get_game_selections_for_date(self, date_str):
         """Get all mentor selections for a specific date"""
-        selections = self.db.getMentorGameSelections(game_date=date_str)
+        selections = self.db.getMentorGameSelections(game_date=date_str, organization_id=self._current_org_id())
         # Organize by venue -> game_id -> list of mentors
         selections_dict = {}
         for sel in selections:
@@ -72,10 +81,11 @@ class MentorGameSelection:
             ui.notify('Invalid mentor name', type='negative')
             return
 
+        org_id = self._current_org_id()
         if is_checked:
             # Add selection
             success, message = self.db.addMentorGameSelection(
-                firstname, lastname, game_date, venue, game_id
+                firstname, lastname, game_date, venue, game_id, org_id
             )
             if success:
                 ui.notify(message, type='positive')
@@ -84,7 +94,7 @@ class MentorGameSelection:
         else:
             # Remove selection
             success, message = self.db.removeMentorGameSelection(
-                firstname, lastname, game_date, venue, game_id
+                firstname, lastname, game_date, venue, game_id, org_id
             )
             if success:
                 ui.notify(message, type='positive')
@@ -92,7 +102,7 @@ class MentorGameSelection:
                 ui.notify(message, type='warning')
 
         # Update the "Selected by" display
-        selected_mentors = self.db.getGameSelectionsByGame(game_date, venue, game_id)
+        selected_mentors = self.db.getGameSelectionsByGame(game_date, venue, game_id, org_id)
         if selected_mentors:
             selected_by_label.text = 'Selected by: ' + ', '.join(selected_mentors)
             selected_by_label.classes('text-xs text-green-600')
@@ -240,13 +250,19 @@ class MentorGameSelection:
         return weekends
 
 
+    def _ensure_workload_for_org(self):
+        cached_org = getattr(ui, 'resultsFromRunOrgId', None)
+        if cached_org != self._current_org_id() and self.ensure_workload:
+            self.ensure_workload()
+
     def render(self):
         """Render the mentor game selection interface"""
+        self._ensure_workload_for_org()
         # Get current user and determine mentor name
         self.current_user = self.auth_manager.get_current_user()
 
         # Get mentors list
-        mentors = self.db.getMentors()
+        mentors = self.db.getMentors(self._current_org_id())
         mentor_values = sorted([f'{m[0].capitalize()} {m[1].capitalize()}' for m in mentors])
 
         # Filter to current user if not admin

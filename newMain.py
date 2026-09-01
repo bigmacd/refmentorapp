@@ -7,7 +7,6 @@ Converted from Streamlit version
 import logging
 from datetime import datetime as dtime
 import os
-from typing import Tuple
 
 # Create logger for this module
 import rmaLogging
@@ -44,32 +43,6 @@ if os.path.isdir(_static_dir):
 #         'message': 'WebSocket server is running' + (' (debug mode may affect connections)' if is_debug else '')
 #     }
 
-def parse_ref_name(name: str) -> Tuple[str, str]:
-    """Parse referee name handling various formats"""
-    if name == '(requested)':
-        return (None, None)
-
-    name = ' '.join(name.split())
-    parts = name.split(',')
-    if len(parts) > 1:
-        first_parts = parts[1].strip().split()
-        return (first_parts[0], parts[0].strip())
-
-    parts = name.split(' ')
-    if len(parts) == 0:
-        return (None, None)
-    elif len(parts) == 1:
-        return (parts[0], "")
-    elif len(parts) == 2:
-        return (parts[0], parts[1])
-    else:
-        suffixes = ["Jr.", "Jr", "Sr.", "Sr", "III", "IV", "II"]
-        if parts[-1] in suffixes:
-            return (parts[0], ' '.join(parts[1:-1]) + ' ' + parts[-1])
-        else:
-            return (parts[0], ' '.join(parts[1:]))
-
-
 def get_current_date_index(dates: list) -> int:
     fs = "%A, %B %d, %Y"
     today = dtime.now()
@@ -80,6 +53,14 @@ def get_current_date_index(dates: list) -> int:
         if this_date >= today:
             return index
     return 0
+
+
+def current_org_id() -> int:
+    """Logged-in user's organization, or default org for background/single-org flows."""
+    org_id = state.auth_manager.get_current_organization_id()
+    if org_id is not None:
+        return org_id
+    return state.db.getDefaultOrganizationId()
 
 
 @ui.page('/')
@@ -103,6 +84,8 @@ def main_page():
         return
 
     # Only proceed if authenticated - show loading state first
+    org_id = current_org_id()
+
     # Create a loading overlay that will be shown while data loads
     loading_overlay = ui.column().classes('fixed inset-0 bg-white bg-opacity-90 dark:bg-gray-900 dark:bg-opacity-90 items-center justify-center z-50')
     with loading_overlay:
@@ -112,7 +95,7 @@ def main_page():
     # Poll for data if background load is still in progress
     def wait_for_background_load():
         # Always check if data is loaded first (background thread might have completed)
-        if state.is_data_loaded():
+        if state.is_data_loaded(org_id):
             # Data is loaded, hide overlay using CSS (most reliable method)
             logger.info("Data loaded, hiding loading overlay")
             loading_overlay.style('display: none !important')
@@ -124,13 +107,10 @@ def main_page():
             ui.timer(0.3, wait_for_background_load, once=True)
             return
 
-        # Not loading and not loaded - try to trigger load
-        # This handles the case where background load hasn't started yet or failed silently
-        logger.info("Data not loaded and not loading, attempting to load...")
+        # Not loading and not loaded - try to trigger load for this org
+        logger.info("Data not loaded for org %s and not loading, attempting to load...", org_id)
         try:
-            state.load_data()
-            # After calling load_data, check again after a short delay
-            # to see if it completed (unlikely but possible for fast loads)
+            state.load_data(organization_id=org_id)
             ui.timer(0.1, wait_for_background_load, once=True)
         except Exception as e:
             logger.error(f"Error loading data: {e}")
@@ -140,13 +120,14 @@ def main_page():
                 ui.label(str(e)).classes('text-gray-600 dark:text-gray-400 mt-2')
                 ui.button('Retry', on_click=lambda: ui.navigate.reload()).classes('mt-4')
 
-    # Check immediately if data is already loaded (from background thread)
-    # This handles the case where background load completed before page render
-    if state.is_data_loaded():
-        logger.info("Data already loaded when page rendered, hiding loading overlay")
+    # Check immediately if data is already loaded for this org
+    if state.is_data_loaded(org_id):
+        logger.info("Data already loaded for org %s when page rendered, hiding loading overlay", org_id)
         loading_overlay.style('display: none !important')
     else:
-        # Start polling for background load completion
+        # Ensure background load targets the logged-in org (may differ from startup default)
+        if not state.is_loading():
+            state._start_background_load(organization_id=org_id)
         ui.timer(0.1, wait_for_background_load, once=True)
 
 
@@ -201,7 +182,8 @@ def main_page():
     calendar_tab = CalendarTab(state.db, state.auth_manager, logger)
     game_selection_tab = MentorGameSelection(
         state.db, state.auth_manager, state.all_match_data, state.dates, logger,
-        get_match_data=lambda: (state.all_match_data, state.dates)
+        get_match_data=lambda: (state.all_match_data, state.dates),
+        ensure_workload=lambda: state.load_workload_data(organization_id=current_org_id()),
     )
 
     with content:
@@ -219,20 +201,21 @@ def main_page():
 
 def render_mentor_report_tab():
     """Render the mentor report entry form"""
+    org_id = current_org_id()
     card = ui.card().classes('form-container w-full')
-    if not state.is_data_loaded():
+    if not state.is_data_loaded(org_id):
         with card:
             with ui.column().classes('items-center justify-center p-8'):
                 ui.spinner(size='lg')
                 ui.label('Loading data...').classes('mt-4 text-gray-600')
                 ui.label('Checking every few seconds. Data will appear when ready.').classes('text-sm text-gray-500 mt-2')
         def check_loaded():
-            if state.is_data_loaded():
+            if state.is_data_loaded(org_id):
                 card.clear()
                 _build_mentor_report_form(card)
             else:
                 if not state.is_loading():
-                    state._start_background_load()
+                    state._start_background_load(organization_id=org_id)
                 ui.timer(0.5, check_loaded, once=True)
         ui.timer(0.5, check_loaded, once=True)
         return
@@ -261,7 +244,8 @@ def _build_mentor_report_form(container):
         ui.label('Enter a Mentor Report').classes('text-xl font-bold mb-4')
 
         # Mentor selection
-        mentors = state.db.getMentors()
+        org_id = current_org_id()
+        mentors = state.db.getMentors(org_id)
         mentor_values = sorted([f'{m[0].capitalize()} {m[1].capitalize()}' for m in mentors])
 
         # Filter to current user if not admin
@@ -416,7 +400,8 @@ def _build_mentor_report_form(container):
                         date_select.value,
                         comments.value,
                         revisit,
-                        current_match.get('GameID', '')
+                        current_match.get('GameID', ''),
+                        org_id,
                     )
 
                     if status:
@@ -450,6 +435,7 @@ def _build_mentor_report_form(container):
 
 def render_reports_tab():
     """Render the reports generation tab"""
+    org_id = current_org_id()
 
     with ui.card().classes('form-container w-full'):
         ui.label('Generate Reports').classes('text-xl font-bold mb-4')
@@ -458,7 +444,7 @@ def render_reports_tab():
         format_select = ui.radio(['Text', 'Excel'], value='Text').props('inline')
 
         # Report type
-        year_data = state.db.getYears()
+        year_data = state.db.getYears(org_id)
         year_data.insert(0, ' ')
 
         report_type = ui.select(
@@ -490,12 +476,12 @@ def render_reports_tab():
                     sel.on_value_change(lambda: set_selection('week', sel.value))
 
                 elif report_type.value == 'by referee':
-                    referees = [' '] + state.db.getRefereesForSelectionBox()
+                    referees = [' '] + state.db.getRefereesForSelectionBox(org_id)
                     sel = ui.select(referees, label='Select Referee').classes('w-full')
                     sel.on_value_change(lambda: set_selection('referee', sel.value))
 
                 elif report_type.value == 'by mentor':
-                    mentors = [' '] + state.db.getMentorsForSelectionBox()
+                    mentors = [' '] + state.db.getMentorsForSelectionBox(org_id)
                     sel = ui.select(mentors, label='Select Mentor').classes('w-full')
                     sel.on_value_change(lambda: set_selection('mentor', sel.value))
 
@@ -524,13 +510,13 @@ def render_reports_tab():
 
             try:
                 if sel_type == 'year':
-                    data = state.db.produceYearReport(sel_value)
+                    data = state.db.produceYearReport(sel_value, org_id)
                 elif sel_type == 'week':
-                    data = state.db.produceWeekReport(sel_value)
+                    data = state.db.produceWeekReport(sel_value, org_id)
                 elif sel_type == 'referee':
-                    data = state.db.produceRefereeReport(sel_value)
+                    data = state.db.produceRefereeReport(sel_value, org_id)
                 elif sel_type == 'mentor':
-                    data = state.db.produceMentorReport(sel_value)
+                    data = state.db.produceMentorReport(sel_value, org_id)
                 else:
                     return
 
@@ -550,50 +536,48 @@ def render_reports_tab():
 
 def render_workload_tab():
     """Render the current workload tab"""
+    org_id = current_org_id()
+    org_name = state.auth_manager.get_current_organization_name() or f'Organization {org_id}'
 
     with ui.card().classes('form-container w-full'):
-        ui.label('Current Workload').classes('text-xl font-bold mb-4')
+        ui.label('Current Workload').classes('text-xl font-bold mb-2')
+        ui.label(f'Organization: {org_name}').classes('text-sm text-gray-400 mb-4')
 
-        # Use ui.label + .text (BindableProperty) so updates reach the browser.
-        # ui.code's .content is not bound the same way; assigning it often does not refresh the client.
         output_area = ui.label('Loading workload data...').classes(
             'w-full whitespace-pre-wrap font-mono text-sm p-4 rounded bg-gray-900'
         )
 
         def check_workload_status():
-            """Check if workload loading is complete and update UI"""
             if not state.workload_loading:
-                # Loading is complete, update UI
                 if state.workload_error:
                     output_area.text = f'Error loading workload: {state.workload_error}'
                 elif state.workload_output:
                     output_area.text = state.workload_output
                 elif ui.resultsFromRun:
-                    # Data is available but output wasn't captured, show success message
                     output_area.text = 'Workload data loaded successfully.'
                 else:
                     output_area.text = 'No workload data available'
-                # Timer will stop automatically since we don't reschedule
             else:
-                # Still loading, check again in 0.5 seconds
                 ui.timer(0.5, check_workload_status, once=True)
 
-        # Check if already loaded
+        cached_org = getattr(ui, 'resultsFromRunOrgId', None)
+        needs_load = (
+            cached_org != org_id
+            or not hasattr(ui, 'resultsFromRun')
+            or ui.resultsFromRun is None
+        )
+
         if not state.workload_loading:
-            if state.workload_error:
+            if state.workload_error and not needs_load:
                 output_area.text = f'Error loading workload: {state.workload_error}'
-            elif state.workload_output:
+            elif state.workload_output and not needs_load:
                 output_area.text = state.workload_output
-            elif hasattr(ui, 'resultsFromRun') and ui.resultsFromRun:
-                output_area.text = 'Workload data loaded successfully.'
+            elif hasattr(ui, 'resultsFromRun') and ui.resultsFromRun and not needs_load:
+                output_area.text = state.workload_output or 'Workload data loaded successfully.'
             else:
-                # Data not loaded yet, start loading if not already started
-                if not hasattr(ui, 'resultsFromRun') or ui.resultsFromRun is None:
-                    state.load_workload_data()
-                # Start polling for completion
+                state.load_workload_data(organization_id=org_id)
                 ui.timer(0.5, check_workload_status, once=True)
         else:
-            # Still loading, start polling
             ui.timer(0.5, check_workload_status, once=True)
 
 
