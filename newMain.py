@@ -63,25 +63,575 @@ def current_org_id() -> int:
     return state.db.getDefaultOrganizationId()
 
 
+def render_landing_page():
+    """Render the public landing page for unauthenticated visitors.
+
+    Layout mirrors a marketing one-pager flow (sticky nav, full-bleed hero,
+    alternating full-width sections, wave dividers, CTA bands) while keeping
+    the existing landing content topics.
+    """
+    ui.dark_mode(False)
+    ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
+    ui.add_head_html('''
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --lp-navy: #0b1f4d;
+            --lp-navy-deep: #071536;
+            --lp-accent: #2f6fed;
+            --lp-sky: #6ec1e4;
+            --lp-ink: #12203a;
+            --lp-muted: #5b6b86;
+            --lp-paper: #f7f9fc;
+            --lp-white: #ffffff;
+        }
+        body, .q-page, .nicegui-content {
+            background: var(--lp-paper) !important;
+            color: var(--lp-ink);
+            font-family: "DM Sans", sans-serif;
+        }
+        .q-page, .nicegui-content {
+            padding: 0 !important;
+            max-width: none !important;
+        }
+        .q-header {
+            background: transparent !important;
+        }
+        .lp-page {
+            width: 100%;
+            overflow-x: hidden;
+        }
+        .lp-header {
+            background: rgba(255, 255, 255, 0.92) !important;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 1px 0 rgba(11, 31, 77, 0.08);
+            color: var(--lp-ink) !important;
+        }
+        .lp-brand {
+            font-family: "Outfit", sans-serif;
+            font-weight: 800;
+            font-size: 1.15rem;
+            letter-spacing: -0.02em;
+            color: var(--lp-navy);
+            text-decoration: none;
+            line-height: 1.1;
+        }
+        .lp-brand small {
+            display: block;
+            font-family: "DM Sans", sans-serif;
+            font-weight: 500;
+            font-size: 0.7rem;
+            color: var(--lp-muted);
+            letter-spacing: 0.02em;
+        }
+        .lp-nav a {
+            color: var(--lp-ink);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 0.35rem;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+        .lp-nav a:hover {
+            background: rgba(47, 111, 237, 0.1);
+            color: var(--lp-accent);
+        }
+        .lp-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.7rem 1.35rem;
+            border-radius: 0.35rem;
+            font-weight: 700;
+            font-size: 0.95rem;
+            text-decoration: none;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+        }
+        .lp-btn:hover {
+            transform: translateY(-1px);
+        }
+        .lp-btn-primary {
+            background: var(--lp-accent);
+            color: white !important;
+            box-shadow: 0 8px 20px rgba(47, 111, 237, 0.28);
+        }
+        .lp-btn-primary:hover {
+            background: #1f58d0;
+            color: white !important;
+        }
+        .lp-btn-ghost {
+            background: transparent;
+            color: white !important;
+            border: 2px solid rgba(255, 255, 255, 0.7);
+        }
+        .lp-btn-ghost:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: white !important;
+        }
+        .lp-btn-outline {
+            background: transparent;
+            color: var(--lp-navy) !important;
+            border: 2px solid var(--lp-navy);
+        }
+        .lp-btn-outline:hover {
+            background: var(--lp-navy);
+            color: white !important;
+        }
+        .lp-hero {
+            position: relative;
+            min-height: 78vh;
+            display: flex;
+            align-items: center;
+            color: white;
+            overflow: hidden;
+        }
+        .lp-hero-media {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+        .lp-hero-media video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .lp-hero-overlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(105deg, rgba(7, 21, 54, 0.88) 0%, rgba(11, 31, 77, 0.72) 48%, rgba(11, 31, 77, 0.45) 100%);
+            z-index: 1;
+        }
+        .lp-hero-inner {
+            position: relative;
+            z-index: 2;
+            width: min(1160px, calc(100% - 2.5rem));
+            margin: 0 auto;
+            padding: 5.5rem 0 4rem;
+        }
+        .lp-eyebrow {
+            display: inline-block;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--lp-sky);
+            margin-bottom: 0.85rem;
+        }
+        .lp-hero h1, .lp-section h2, .lp-band h2, .lp-grid-section h2 {
+            font-family: "Outfit", sans-serif;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1.08;
+            margin: 0;
+        }
+        .lp-hero h1 {
+            font-size: clamp(2.4rem, 5vw, 3.75rem);
+            max-width: 14ch;
+            margin-bottom: 1rem;
+        }
+        .lp-hero p {
+            font-size: 1.15rem;
+            line-height: 1.65;
+            max-width: 36rem;
+            color: rgba(255, 255, 255, 0.88);
+            margin: 0 0 1.75rem;
+        }
+        .lp-cta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.85rem;
+        }
+        .lp-section {
+            width: 100%;
+            padding: 4.5rem 1.25rem;
+        }
+        .lp-section-inner {
+            width: min(1160px, 100%);
+            margin: 0 auto;
+        }
+        .lp-split {
+            display: grid;
+            grid-template-columns: 1.05fr 1fr;
+            gap: 3rem;
+            align-items: center;
+        }
+        .lp-media-frame {
+            border-radius: 0.5rem;
+            overflow: hidden;
+            box-shadow: 0 18px 40px rgba(11, 31, 77, 0.18);
+            background: #000;
+            aspect-ratio: 16 / 10;
+        }
+        .lp-media-frame video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .lp-kicker {
+            color: var(--lp-accent);
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.5rem;
+        }
+        .lp-section h2 {
+            font-size: clamp(1.9rem, 3.5vw, 2.6rem);
+            color: var(--lp-navy);
+            margin-bottom: 1rem;
+        }
+        .lp-copy {
+            color: var(--lp-muted);
+            font-size: 1.05rem;
+            line-height: 1.7;
+            margin-bottom: 1.25rem;
+        }
+        .lp-checklist {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 1.5rem;
+            display: grid;
+            gap: 0.65rem;
+        }
+        .lp-checklist li {
+            position: relative;
+            padding-left: 1.7rem;
+            color: var(--lp-ink);
+            font-weight: 500;
+            line-height: 1.45;
+        }
+        .lp-checklist li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0.35rem;
+            width: 0.9rem;
+            height: 0.9rem;
+            border-radius: 999px;
+            background: rgba(47, 111, 237, 0.15);
+            box-shadow: inset 0 0 0 2px var(--lp-accent);
+        }
+        .lp-checklist li::after {
+            content: "";
+            position: absolute;
+            left: 0.28rem;
+            top: 0.52rem;
+            width: 0.35rem;
+            height: 0.2rem;
+            border-left: 2px solid var(--lp-accent);
+            border-bottom: 2px solid var(--lp-accent);
+            transform: rotate(-45deg);
+        }
+        .lp-waves {
+            background-color: var(--lp-paper);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='30' viewBox='0 0 1000 120'%3E%3Cg fill='none' stroke='%23e8eef8' stroke-width='6.6'%3E%3Cpath d='M-500 75c0 0 125-30 250-30S0 75 0 75s125 30 250 30s250-30 250-30s125-30 250-30s250 30 250 30s125 30 250 30s250-30 250-30'/%3E%3Cpath d='M-500 45c0 0 125-30 250-30S0 45 0 45s125 30 250 30s250-30 250-30s125-30 250-30s250 30 250 30s125 30 250 30s250-30 250-30'/%3E%3Cpath d='M-500 105c0 0 125-30 250-30S0 105 0 105s125 30 250 30s250-30 250-30s125-30 250-30s250 30 250 30s125 30 250 30s250-30 250-30'/%3E%3C/g%3E%3C/svg%3E");
+            background-attachment: fixed;
+        }
+        .lp-band {
+            position: relative;
+            padding: 5rem 1.25rem;
+            color: white;
+            text-align: center;
+            background:
+                linear-gradient(180deg, rgba(7, 21, 54, 0.82), rgba(7, 21, 54, 0.88)),
+                radial-gradient(circle at 20% 20%, #1e40af, transparent 55%),
+                radial-gradient(circle at 80% 80%, #0ea5e9, transparent 45%),
+                var(--lp-navy-deep);
+            background-attachment: fixed, fixed, fixed, scroll;
+        }
+        .lp-band-inner {
+            width: min(760px, 100%);
+            margin: 0 auto;
+        }
+        .lp-band h2 {
+            font-size: clamp(1.9rem, 3.5vw, 2.5rem);
+            margin-bottom: 1rem;
+            color: white;
+        }
+        .lp-band p {
+            color: rgba(255, 255, 255, 0.86);
+            font-size: 1.08rem;
+            line-height: 1.7;
+            margin: 0 0 1.6rem;
+        }
+        .lp-grid-section {
+            background: var(--lp-navy);
+            color: white;
+            padding: 4.5rem 1.25rem;
+        }
+        .lp-grid-section h2 {
+            color: white;
+            text-align: center;
+            margin-bottom: 2.25rem;
+            font-size: clamp(1.9rem, 3.5vw, 2.5rem);
+        }
+        .lp-feature-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            width: min(1160px, 100%);
+            margin: 0 auto 2rem;
+        }
+        .lp-feature {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 0.5rem;
+            padding: 1.5rem 1.15rem;
+            text-align: center;
+            min-height: 10.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 0.75rem;
+            transition: transform 0.2s ease, background 0.2s ease;
+        }
+        .lp-feature:hover {
+            transform: translateY(-4px);
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .lp-feature-icon {
+            width: 2.5rem;
+            height: 2.5rem;
+            margin: 0 auto;
+            border-radius: 999px;
+            display: grid;
+            place-items: center;
+            background: rgba(110, 193, 228, 0.18);
+            color: var(--lp-sky);
+            font-size: 1.15rem;
+            font-weight: 800;
+            font-family: "Outfit", sans-serif;
+        }
+        .lp-feature h3 {
+            font-family: "Outfit", sans-serif;
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin: 0;
+            line-height: 1.3;
+        }
+        .lp-center {
+            text-align: center;
+        }
+        .lp-contact {
+            background: var(--lp-navy);
+            color: white;
+            padding: 2.75rem 1.25rem;
+        }
+        .lp-contact-inner {
+            width: min(1160px, 100%);
+            margin: 0 auto;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.25rem;
+        }
+        .lp-contact h2 {
+            font-family: "Outfit", sans-serif;
+            font-size: clamp(1.4rem, 2.5vw, 1.9rem);
+            margin: 0;
+            font-weight: 700;
+        }
+        .lp-footer {
+            background: var(--lp-navy-deep);
+            color: rgba(255, 255, 255, 0.7);
+            text-align: center;
+            padding: 1.5rem 1rem 2rem;
+            font-size: 0.9rem;
+        }
+        .lp-reveal {
+            opacity: 0;
+            transform: translateY(28px);
+            transition: opacity 0.7s ease, transform 0.7s ease;
+        }
+        .lp-reveal.is-visible {
+            opacity: 1;
+            transform: none;
+        }
+        html {
+            scroll-behavior: smooth;
+        }
+        @media (max-width: 960px) {
+            .lp-split,
+            .lp-feature-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            .lp-hero {
+                min-height: 70vh;
+            }
+            .lp-nav-desktop {
+                display: none !important;
+            }
+        }
+        @media (max-width: 640px) {
+            .lp-feature-grid {
+                grid-template-columns: 1fr;
+            }
+            .lp-hero-inner {
+                padding-top: 4.5rem;
+            }
+            .lp-contact-inner {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+    ''')
+
+    with ui.header().classes('lp-header items-center px-4 py-3').props('bordered=false'):
+        with ui.row().classes('w-full items-center justify-between gap-4').style('max-width: 1160px; margin: 0 auto;'):
+            ui.html(
+                '<a class="lp-brand" href="#">Referee Mentor System'
+                '<small>powered by Swynga LLC</small></a>',
+                sanitize=False,
+            )
+            with ui.row().classes('lp-nav lp-nav-desktop items-center gap-1 flex-wrap'):
+                ui.link('About', '#about-us')
+                ui.link('Why Us', '#why-choose')
+                ui.link('How it Works', '#how-it-works')
+                ui.link('Contact', '#contact-us')
+            ui.link('Sign In', '/login').classes('lp-btn lp-btn-primary')
+
+    with ui.element('div').classes('lp-page'):
+        # Hero — full-bleed media + overlay + CTA group
+        with ui.element('section').classes('lp-hero'):
+            with ui.element('div').classes('lp-hero-media'):
+                ui.html('''
+                    <video autoplay muted loop playsinline>
+                        <source src="/static/landing.mp4" type="video/mp4">
+                    </video>
+                ''', sanitize=False)
+            ui.element('div').classes('lp-hero-overlay')
+            with ui.element('div').classes('lp-hero-inner lp-reveal'):
+                ui.html('<h1>Referee Mentor System</h1>', sanitize=False)
+                ui.html(
+                    '<p>A guided, data-driven interface for referee mentors to capture feedback, '
+                    'manage assignments, and track development.</p>',
+                    sanitize=False,
+                )
+                with ui.element('div').classes('lp-cta-row'):
+                    ui.link('Sign In', '/login').classes('lp-btn lp-btn-primary')
+                    ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-ghost')
+
+        # About — split media / copy (like "We Can Help")
+        with ui.element('section').props('id=about-us').classes('lp-section lp-waves'):
+            with ui.element('div').classes('lp-section-inner lp-split lp-reveal'):
+                with ui.element('div').classes('lp-media-frame'):
+                    ui.html('''
+                        <video autoplay muted loop playsinline>
+                            <source src="/static/small_video.mp4" type="video/mp4">
+                        </video>
+                    ''', sanitize=False)
+                with ui.element('div'):
+                    ui.label('What is the Referee Mentor System?').classes('lp-kicker')
+                    ui.html('<h2>Built for real mentoring</h2>', sanitize=False)
+                    ui.html(
+                        '<p class="lp-copy">Swynga LLC created the Referee Mentor System to help mentors '
+                        'and referees improve performance through structured feedback, clear assignments, '
+                        'and meaningful progress tracking.</p>',
+                        sanitize=False,
+                    )
+                    ui.html('''
+                        <ul class="lp-checklist">
+                            <li>Structured mentoring with guided report forms and role-specific checklists</li>
+                            <li>Scheduling &amp; assignments with workload balancing</li>
+                            <li>Insights &amp; exports to measure development over time</li>
+                            <li>Privacy &amp; security with role-based access</li>
+                        </ul>
+                    ''', sanitize=False)
+                    ui.html(
+                        '<p class="lp-copy">Built in collaboration with referees and mentors — '
+                        'lightweight, practical, and focused on real-world improvement.</p>',
+                        sanitize=False,
+                    )
+
+        # Why choose — centered CTA band
+        with ui.element('section').props('id=why-choose').classes('lp-band'):
+            with ui.element('div').classes('lp-band-inner lp-reveal'):
+                ui.html('<h2>Why choose this tool?</h2>', sanitize=False)
+                ui.html(
+                    '<p>Designed specifically for referee mentoring, the platform combines reporting, '
+                    'scheduling, and workload insights in one polished workspace.</p>',
+                    sanitize=False,
+                )
+                ui.link('Explore How it Works', '#how-it-works').classes('lp-btn lp-btn-ghost')
+
+        # How it works — feature grid (like "Our Services")
+        with ui.element('section').props('id=how-it-works').classes('lp-grid-section'):
+            ui.html('<h2 class="lp-reveal">How it Works</h2>', sanitize=False)
+            with ui.element('div').classes('lp-feature-grid lp-reveal'):
+                for num, title in (
+                    ('1', 'Select games'),
+                    ('2', 'Review performance'),
+                    ('3', 'Capture mentoring notes'),
+                    ('4', 'Track development'),
+                ):
+                    with ui.element('div').classes('lp-feature'):
+                        ui.label(num).classes('lp-feature-icon')
+                        ui.html(f'<h3>{title}</h3>', sanitize=False)
+            with ui.element('div').classes('lp-center'):
+                ui.html(
+                    '<p style="color:rgba(255,255,255,0.8);max-width:40rem;margin:0 auto 1.5rem;'
+                    'line-height:1.65;">Select games, review referee performance, and submit mentoring '
+                    'notes with a clear workflow.</p>',
+                    sanitize=False,
+                )
+                ui.link('Get Started', '#get-started').classes('lp-btn lp-btn-primary')
+
+        # Get started — second CTA band
+        with ui.element('section').props('id=get-started').classes('lp-band'):
+            with ui.element('div').classes('lp-band-inner lp-reveal'):
+                ui.html('<h2>Get Started</h2>', sanitize=False)
+                ui.html(
+                    '<p>Sign in to immediately access mentor reports, schedules, and workload tracking.</p>',
+                    sanitize=False,
+                )
+                ui.link('Sign In', '/login').classes('lp-btn lp-btn-primary')
+
+        # Contact strip
+        with ui.element('section').props('id=contact-us').classes('lp-contact'):
+            with ui.element('div').classes('lp-contact-inner lp-reveal'):
+                ui.html('<h2>Questions about the Referee Mentor System?</h2>', sanitize=False)
+                with ui.row().classes('gap-3 flex-wrap'):
+                    ui.link('Sign In', '/login').classes('lp-btn lp-btn-ghost')
+                    ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-primary')
+
+        with ui.element('footer').classes('lp-footer'):
+            ui.label(f'© {dtime.now().year} Swynga LLC. All rights reserved.')
+
+    ui.add_body_html('''
+    <script>
+    (function () {
+      const reveal = () => {
+        document.querySelectorAll('.lp-reveal').forEach((el) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.top < window.innerHeight * 0.88) {
+            el.classList.add('is-visible');
+          }
+        });
+      };
+      window.addEventListener('scroll', reveal, { passive: true });
+      window.addEventListener('load', reveal);
+      setTimeout(reveal, 50);
+    })();
+    </script>
+    ''')
+
+
 @ui.page('/')
 def main_page():
-    ui.dark_mode(True)
     # Check authentication FIRST - before ANY UI is created
     is_auth = state.auth_manager.is_authenticated()
 
     if not is_auth:
-        # Use meta refresh for immediate redirect (happens before page renders)
-        ui.add_head_html('''
-            <meta http-equiv="refresh" content="0; url=/login">
-            <script>
-                // Backup: immediate JavaScript redirect
-                if (window.location.pathname !== '/login') {
-                    window.location.replace('/login');
-                }
-            </script>
-        ''')
-        # Return immediately - don't create any UI
+        render_landing_page()
         return
+
+    ui.dark_mode(True)
 
     # Only proceed if authenticated - show loading state first
     org_id = current_org_id()

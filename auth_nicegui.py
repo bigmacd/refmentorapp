@@ -437,6 +437,7 @@ def login_page():
 
         ui.button('Login', on_click=do_login).classes('w-full mt-4').props('color=primary')
         ui.button('Forgot Password?', on_click=lambda: ui.navigate.to('/forgot-password')).classes('w-full mt-2').props('flat')
+        ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).classes('w-full mt-2').props('flat')
         ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
 
 

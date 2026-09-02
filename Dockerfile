@@ -7,6 +7,7 @@ WORKDIR /app
 COPY requirements.txt /app/
 COPY VERSION /app/VERSION
 COPY *.py /app/
+COPY static /app/static
 COPY root.crt /root/.postgresql/root.crt
 COPY mysoccerleague.com.chained.crt /app/mysoccerleague.com.chained.crt
 COPY psyched-runner-378322-6ea04e89b69e.json /app/psyched-runner-378322-6ea04e89b69e.json
