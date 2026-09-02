@@ -557,7 +557,7 @@ def render_landing_page():
                 with ui.element('div').classes('lp-media-frame'):
                     ui.html('''
                         <video autoplay muted loop playsinline>
-                            <source src="/static/landing.mp4" type="video/mp4">
+                            <source src="/static/small_video.mp4" type="video/mp4">
                         </video>
                     ''', sanitize=False)
                 with ui.element('div'):
