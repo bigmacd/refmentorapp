@@ -1058,6 +1058,15 @@ class RefereeDbCockroach(object):
             )
 
         try:
+            # Explicit cleanup — production DB may lack ON DELETE CASCADE on these FKs
+            self.executeSql(
+                "DELETE FROM mentor_game_selections WHERE organization_id = %s",
+                (organization_id,),
+            )
+            self.executeSql(
+                "DELETE FROM user_organizations WHERE organization_id = %s",
+                (organization_id,),
+            )
             sql = "DELETE FROM organizations WHERE id = %s"
             self.executeSql(sql, (organization_id,))
             self.connection.commit()

@@ -2,11 +2,23 @@
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
+# Multi-process: `app` serves the UI; `worker` runs sync_worker.py on a schedule.
+# Both processes should run on the same machine so they share the /data volume.
+# Create the volume once: fly volumes create data_cache --region iad --size 1
 
 app = 'refmentorassignments'
 primary_region = 'iad'
 
 [build]
+
+[env]
+  DATA_CACHE_DIR = '/data/cache'
+  ALLOW_LIVE_FETCH = 'false'
+  SYNC_INTERVAL_HOURS = '2'
+
+[processes]
+  app = 'python3 newMain.py'
+  worker = 'python3 sync_worker.py'
 
 [http_service]
   internal_port = 443
@@ -16,7 +28,12 @@ primary_region = 'iad'
   min_machines_running = 0
   processes = ['app']
 
+[[mounts]]
+  source = 'data_cache'
+  destination = '/data'
+
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+  processes = ['app', 'worker']

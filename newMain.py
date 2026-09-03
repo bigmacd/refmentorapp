@@ -642,43 +642,46 @@ def main_page():
         ui.spinner(size='xl')
         ui.label('Loading data...').classes('mt-4 text-xl text-gray-700 dark:text-gray-300')
 
-    # Poll for data if background load is still in progress
+    # Poll until match schedule is available in the filesystem cache (written by sync_worker)
     def wait_for_background_load():
-        # Always check if data is loaded first (background thread might have completed)
         if state.is_data_loaded(org_id):
-            # Data is loaded, hide overlay using CSS (most reliable method)
-            logger.info("Data loaded, hiding loading overlay")
-            loading_overlay.style('display: none !important')
-            return
+            try:
+                state.load_data(organization_id=org_id)
+            except Exception as e:
+                logger.error("Error loading match data from cache: %s", e)
+            if state.all_match_data is not None:
+                logger.info("Data loaded, hiding loading overlay")
+                loading_overlay.style('display: none !important')
+                return
 
-        # If still loading, continue polling
-        if state.is_loading():
-            logger.debug("Data still loading, will check again in 0.3 seconds")
-            ui.timer(0.3, wait_for_background_load, once=True)
-            return
+        status = state.sync_status_message(org_id)
+        if status:
+            logger.debug("Cache status: %s", status)
 
-        # Not loading and not loaded - try to trigger load for this org
-        logger.info("Data not loaded for org %s and not loading, attempting to load...", org_id)
         try:
             state.load_data(organization_id=org_id)
-            ui.timer(0.1, wait_for_background_load, once=True)
+            if state.all_match_data is not None:
+                loading_overlay.style('display: none !important')
+                return
         except Exception as e:
-            logger.error(f"Error loading data: {e}")
-            loading_overlay.clear()
-            with loading_overlay:
-                ui.label('Error loading data').classes('text-red-500 text-xl')
-                ui.label(str(e)).classes('text-gray-600 dark:text-gray-400 mt-2')
-                ui.button('Retry', on_click=lambda: ui.navigate.reload()).classes('mt-4')
+            logger.debug("Match data not ready yet: %s", e)
 
-    # Check immediately if data is already loaded for this org
+        ui.timer(2.0, wait_for_background_load, once=True)
+
     if state.is_data_loaded(org_id):
+        try:
+            state.load_data(organization_id=org_id)
+        except Exception as e:
+            logger.error("Error loading match data from cache: %s", e)
+    if state.all_match_data is not None:
         logger.info("Data already loaded for org %s when page rendered, hiding loading overlay", org_id)
         loading_overlay.style('display: none !important')
     else:
-        # Ensure background load targets the logged-in org (may differ from startup default)
-        if not state.is_loading():
-            state._start_background_load(organization_id=org_id)
-        ui.timer(0.1, wait_for_background_load, once=True)
+        status = state.sync_status_message(org_id)
+        if status:
+            with loading_overlay:
+                ui.label(status).classes('mt-2 text-gray-600 dark:text-gray-400 text-center max-w-md')
+        ui.timer(0.5, wait_for_background_load, once=True)
 
 
     # PWA manifest
@@ -733,6 +736,7 @@ def main_page():
     game_selection_tab = MentorGameSelection(
         state.db, state.auth_manager, state.all_match_data, state.dates, logger,
         get_match_data=lambda: (state.all_match_data, state.dates),
+        ensure_match_data=lambda: state.load_data(organization_id=current_org_id()),
         ensure_workload=lambda: state.load_workload_data(organization_id=current_org_id()),
     )
 
@@ -761,12 +765,19 @@ def render_mentor_report_tab():
                 ui.label('Checking every few seconds. Data will appear when ready.').classes('text-sm text-gray-500 mt-2')
         def check_loaded():
             if state.is_data_loaded(org_id):
+                try:
+                    state.load_data(organization_id=org_id)
+                except Exception:
+                    pass
+            if state.all_match_data is not None:
                 card.clear()
                 _build_mentor_report_form(card)
             else:
-                if not state.is_loading():
-                    state._start_background_load(organization_id=org_id)
-                ui.timer(0.5, check_loaded, once=True)
+                try:
+                    state.load_data(organization_id=org_id)
+                except Exception:
+                    pass
+                ui.timer(2.0, check_loaded, once=True)
         ui.timer(0.5, check_loaded, once=True)
         return
     _build_mentor_report_form(card)

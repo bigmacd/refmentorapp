@@ -4,6 +4,7 @@ newRefs/
 referees.db
 .DS_Store
 .streamlit/secrets.toml
+.data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -142,3 +143,6 @@ local.settings.json
 *.json
 psyched-runner-378322-*.json
 tools/
+TEST_README.md
+todo.txt
+.safety-project.ini

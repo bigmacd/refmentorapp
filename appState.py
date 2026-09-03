@@ -5,6 +5,7 @@ from database import RefereeDbCockroach
 from auth_nicegui import AuthManager
 from uiData import getAllData
 from generateWorkload import WorkloadGenerator, resolve_workload_organization_id
+from data_store import has_match_schedule, has_workload, load_meta
 
 
 # Global state
@@ -21,17 +22,11 @@ class AppState:
         self.loaded = False
         self._loading = False
         self._load_lock = threading.Lock()
-        # Initialize workload data storage
+        # Workload data (loaded from filesystem cache written by sync_worker)
         self.workload_output = None
         self.workload_error = None
         self.workload_loading = False
         self._workload_lock = threading.Lock()
-        # Background loads have no browser session — use default org, not app.storage.user
-        default_org_id = resolve_workload_organization_id(self.db)
-        self._start_background_load(organization_id=default_org_id)
-        self._start_background_workload_load(organization_id=default_org_id)
-        # Start periodic provider reload scheduler
-        self._start_periodic_reload_scheduler()
 
     def _data_org_id(self, organization_id=None) -> int:
         if organization_id is not None:
@@ -41,22 +36,8 @@ class AppState:
             return org_id
         return resolve_workload_organization_id(self.db)
 
-    def _start_background_load(self, force_reload=False, organization_id=None):
-        """Start loading match schedule data in a background thread without blocking."""
-
-        def load_in_background():
-            try:
-                self.logger.info("Starting background match data load...")
-                self.load_data(force_reload=force_reload, organization_id=organization_id)
-                self.logger.info("Background match data load completed")
-            except Exception as e:
-                self.logger.error(f"Error in background data load: {e}", exc_info=True)
-
-        thread = threading.Thread(target=load_in_background, daemon=True)
-        thread.start()
-
     def load_data(self, force_reload=False, organization_id=None):
-        """Load season match schedule for the given or current organization."""
+        """Load season match schedule for the given or current organization (from cache)."""
         org_id = self._data_org_id(organization_id)
 
         with self._load_lock:
@@ -86,43 +67,20 @@ class AppState:
                     self._loading = False
 
     def is_data_loaded(self, organization_id=None) -> bool:
-        """Check if match data has been loaded for the requested (or current) org."""
+        """Check if match data is available for the requested (or current) org."""
         org_id = self._data_org_id(organization_id)
-        result = (
+        if (
             self.loaded
             and self.all_match_data is not None
             and self.match_data_org_id == org_id
-        )
-        self.logger.debug(
-            "is_data_loaded: %s (loaded=%s, match_org=%s, want_org=%s, data_len=%s)",
-            result,
-            self.loaded,
-            self.match_data_org_id,
-            org_id,
-            len(self.all_match_data) if self.all_match_data else 0,
-        )
-        return result
-
-    def _start_background_workload_load(self, force_reload=False, organization_id=None):
-        """Start loading workload data in a background thread without blocking"""
-
-        def load_workload_in_background():
-            try:
-                self.logger.info("Starting background workload data load...")
-                self.load_workload_data(force_reload=force_reload, organization_id=organization_id)
-                self.logger.info("Background workload data load completed")
-            except Exception as e:
-                self.logger.error(f"Error in background workload data load: {e}", exc_info=True)
-
-        thread = threading.Thread(target=load_workload_in_background, daemon=True)
-        thread.start()
-
-    def _workload_org_id(self, organization_id=None) -> int:
-        return self._data_org_id(organization_id)
+        ):
+            return True
+        # Cache on disk counts even before this process has loaded it into memory
+        return has_match_schedule(org_id)
 
     def load_workload_data(self, force_reload=False, organization_id=None):
-        """Load workload data for the given or current organization."""
-        org_id = self._workload_org_id(organization_id)
+        """Load workload data for the given or current organization (from cache)."""
+        org_id = self._data_org_id(organization_id)
         cached_org_id = getattr(self.ui, 'resultsFromRunOrgId', None)
 
         with self._workload_lock:
@@ -147,44 +105,29 @@ class AppState:
                 except Exception as e:
                     self.logger.error(f"Failed to load workload data: {e}", exc_info=True)
                     self.workload_error = str(e)
+                    meta = load_meta(org_id) or {}
+                    if meta.get('workload_error'):
+                        self.workload_error = meta['workload_error']
                     raise
                 finally:
                     self.workload_loading = False
 
     def is_loading(self) -> bool:
-        """Check if match data is currently being loaded"""
-        return self._loading
+        """Disk reads are fast; no background scrape in the UI process."""
+        return self._loading or self.workload_loading
 
-    # Interval between automatic full refetches from the assignment provider (and workload rebuild).
-    RELOAD_INTERVAL_HOURS = 2
-
-    def _schedule_periodic_reload(self):
-        """Schedule the next full data reload after RELOAD_INTERVAL_HOURS."""
-        seconds_until_reload = self.RELOAD_INTERVAL_HOURS * 3600
-
-        self.logger.info(
-            f"Scheduling next assignment-provider data reload in {self.RELOAD_INTERVAL_HOURS} hour(s) "
-            f"({seconds_until_reload} seconds)"
-        )
-
-        def perform_periodic_reload():
-            try:
-                self.logger.info(
-                    f"Starting scheduled data reload (every {self.RELOAD_INTERVAL_HOURS} hours)..."
-                )
-                default_org_id = resolve_workload_organization_id(self.db)
-                self._start_background_load(force_reload=True, organization_id=default_org_id)
-                self._start_background_workload_load(force_reload=True, organization_id=default_org_id)
-                self.logger.info("Scheduled data reload completed")
-            except Exception as e:
-                self.logger.error(f"Error during scheduled data reload: {e}", exc_info=True)
-            finally:
-                self._schedule_periodic_reload()
-
-        timer = threading.Timer(seconds_until_reload, perform_periodic_reload)
-        timer.daemon = True
-        timer.start()
-
-    def _start_periodic_reload_scheduler(self):
-        """Start the periodic reload scheduler (see RELOAD_INTERVAL_HOURS)."""
-        self._schedule_periodic_reload()
+    def sync_status_message(self, organization_id=None) -> str | None:
+        """Human-readable message when cache is missing or last sync failed."""
+        org_id = self._data_org_id(organization_id)
+        meta = load_meta(org_id)
+        if not meta:
+            if not has_match_schedule(org_id) and not has_workload(org_id):
+                return 'Waiting for the sync worker to populate data for this organization.'
+            return None
+        if meta.get('last_sync_error'):
+            return f"Last sync had errors: {meta['last_sync_error']}"
+        if meta.get('match_schedule_error'):
+            return f"Match schedule sync error: {meta['match_schedule_error']}"
+        if meta.get('workload_error'):
+            return f"Workload sync error: {meta['workload_error']}"
+        return None

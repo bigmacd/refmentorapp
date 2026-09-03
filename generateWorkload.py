@@ -10,6 +10,7 @@ from assignment_providers import (
     get_assignment_provider,
     sync_new_referees,
 )
+from data_store import allow_live_fetch, has_workload, load_workload
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +197,40 @@ class WorkloadGenerator:
 
         return stdout_capture.getvalue(), results_from_run
 
+    def generate_and_persist(self, organization_id: int) -> tuple[str, dict]:
+        """Run a live workload generation (used by sync_worker). Does not use filesystem cache."""
+        if organization_id in self._generating:
+            raise RuntimeError(f'Workload generation already in progress for org {organization_id}')
+
+        self._generating.add(organization_id)
+        try:
+            logger.info('Generating workload data for organization_id=%s', organization_id)
+            output, results = self._generate_workload_data(organization_id)
+            self._cache[organization_id] = (output, results)
+            return output, results
+        finally:
+            self._generating.discard(organization_id)
+
+    def _load_from_store(self, organization_id: int) -> Optional[tuple[str, dict]]:
+        cached = load_workload(organization_id)
+        if cached is not None:
+            self._cache[organization_id] = cached
+        return cached
+
     def get_workload_output(self, organization_id: int, force_refresh: bool = False) -> str:
+        if not force_refresh:
+            cached = self._load_from_store(organization_id)
+            if cached is not None:
+                return cached[0]
+
+        if not allow_live_fetch():
+            if organization_id in self._cache:
+                return self._cache[organization_id][0]
+            raise RuntimeError(
+                'Workload data is not available yet. '
+                'The sync worker will populate the cache shortly.'
+            )
+
         if force_refresh or organization_id not in self._cache:
             if organization_id in self._generating:
                 logger.warning(
@@ -220,6 +254,11 @@ class WorkloadGenerator:
         return self._cache[organization_id][0]
 
     def get_workload_results(self, organization_id: int, force_refresh: bool = False) -> dict:
+        if not force_refresh:
+            cached = self._load_from_store(organization_id)
+            if cached is not None:
+                return cached[1]
+
         self.get_workload_output(organization_id, force_refresh=force_refresh)
         return self._cache.get(organization_id, ('', {}))[1]
 
@@ -246,24 +285,6 @@ def run(organization_id: int = None) -> dict:
     output = generator.get_workload_output(org_id)
     print(output, end='')
     return generator.get_workload_results(org_id)
-
-
-def getEmails():
-    import mechanicalsoup
-    from refWebSites import MySoccerLeague
-
-    try:
-        br = mechanicalsoup.StatefulBrowser(soup_config={'features': 'lxml'})
-        br.addheaders = [('User-agent', 'Chrome')]
-        site = MySoccerLeague(br)
-        _ = site.getAllReferees()
-        return site.emails
-    except RuntimeError as e:
-        logger.error(f'Failed to get emails: {e}')
-        raise
-    except Exception as e:
-        logger.error(f'Unexpected error getting emails: {e}')
-        raise RuntimeError(f'Failed to retrieve emails from MySoccerLeague: {e}') from e
 
 
 if __name__ == '__main__':

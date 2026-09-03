@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from assignment_providers import get_workload_config, get_assignment_provider
+from data_store import allow_live_fetch, load_match_schedule, save_match_schedule
 from database import RefereeDbCockroach
 
 logger = logging.getLogger(__name__)
@@ -92,12 +93,27 @@ class UIData:
         """
         Get season match schedule for an organization.
 
-        Args:
-            organization_id: Organization whose provider supplies the schedule
-            force_refresh: If True, bypass cache and fetch fresh data
+        Reads from the filesystem cache when available. Live provider fetch only when
+        ALLOW_LIVE_FETCH=true (local dev without a worker).
         """
+        if not force_refresh:
+            cached = load_match_schedule(organization_id)
+            if cached is not None:
+                self._cache[organization_id] = {'data': cached, 'fetched_at': datetime.now()}
+                return cached
+
+        if not allow_live_fetch():
+            if organization_id in self._cache:
+                return self._cache[organization_id]['data']
+            raise RuntimeError(
+                'Match schedule is not available yet. '
+                'The sync worker will populate the cache shortly.'
+            )
+
         if force_refresh or self._is_stale(organization_id):
-            return self._fetch_data(organization_id)
+            data = self._fetch_data(organization_id)
+            save_match_schedule(organization_id, data)
+            return data
         return self._cache[organization_id]['data']
 
     def refresh(self, organization_id: int) -> dict:

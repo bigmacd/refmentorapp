@@ -16,6 +16,4 @@ RUN apk upgrade --no-cache
 RUN python3 -m pip install --upgrade "pip>=26.2" "msgpack>=1.2.1" "setuptools>=83.0.0"
 RUN pip3 install -r requirements.txt
 
-
-
-ENTRYPOINT ["python3", "newMain.py"]
+CMD ["python3", "newMain.py"]
