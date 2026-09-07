@@ -1,0 +1,41 @@
+# Staging Fly.io config for branch / feature testing.
+# Deploy with: fly deploy -c fly.staging.toml --image-label staging-$(git rev-parse --short HEAD)
+#
+# One-time setup:
+#   fly volumes create data_cache --app staging-refmentor-931 --region iad --size 1
+#   fly secrets set -a staging-refmentor-931 db_url=... STORAGE_SECRET=... ...
+#
+# IMPORTANT: Fly volumes attach to a single machine. App + sync worker must share
+# that machine (one process group that starts both), or the UI cannot read the cache.
+
+app = 'staging-refmentor-931'
+primary_region = 'iad'
+
+[build]
+
+[env]
+  DATA_CACHE_DIR = '/data/cache'
+  ALLOW_LIVE_FETCH = 'false'
+  SYNC_INTERVAL_HOURS = '2'
+
+# Single process group: worker + UI on the same machine so they share /data.
+[processes]
+  app = "sh -c 'python3 sync_worker.py & exec python3 newMain.py'"
+
+[http_service]
+  internal_port = 443
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[mounts]]
+  source = 'data_cache'
+  destination = '/data'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  processes = ['app']

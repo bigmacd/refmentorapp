@@ -255,7 +255,10 @@ class MentorGameSelection:
     def _ensure_workload_for_org(self):
         cached_org = getattr(ui, 'resultsFromRunOrgId', None)
         if cached_org != self._current_org_id() and self.ensure_workload:
-            self.ensure_workload()
+            try:
+                self.ensure_workload()
+            except Exception as e:
+                self.logger.debug('ensure_workload failed: %s', e)
 
     def _ensure_match_data_loaded(self):
         if self.all_match_data is not None:

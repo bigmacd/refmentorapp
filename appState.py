@@ -108,7 +108,11 @@ class AppState:
                     meta = load_meta(org_id) or {}
                     if meta.get('workload_error'):
                         self.workload_error = meta['workload_error']
-                    raise
+                    # Do not raise — missing cache must not 500 the whole UI while the worker catches up
+                    self.workload_output = self.workload_error or 'Workload data is not available yet.'
+                    if not hasattr(self.ui, 'resultsFromRun') or self.ui.resultsFromRun is None:
+                        self.ui.resultsFromRun = {}
+                    self.ui.resultsFromRunOrgId = org_id
                 finally:
                     self.workload_loading = False
 

@@ -63,6 +63,214 @@ class RefereeDbCockroach(object):
             if not self.cursor.fetchone()[0] == 1:
                 self._createMentorGameSelectionsTable()
 
+            # Existing DBs restored from pre-multi-tenant backups need column migrations
+            self._migrateMultiTenantSchema()
+
+        # Fresh createDb() path also needs org tables + columns before first use
+        if self._tableExists('referees') and not self._columnExists('referees', 'organization_id'):
+            self._migrateMultiTenantSchema()
+        elif self._tableExists('users') and (
+            not self._columnExists('users', 'first_name')
+            or not self._columnExists('users', 'last_name')
+        ):
+            self._migrateMultiTenantSchema()
+
+
+    def _tableExists(self, table_name: str) -> bool:
+        self.executeSql(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name = %s
+            """,
+            (table_name,),
+        )
+        return self.cursor.fetchone() is not None
+
+    def _columnExists(self, table_name: str, column_name: str) -> bool:
+        self.executeSql(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+            """,
+            (table_name, column_name),
+        )
+        return self.cursor.fetchone() is not None
+
+    def _ensureOrganizationsSeeded(self) -> int:
+        """Ensure organizations / user_organizations exist and at least one org row is present."""
+        if not self._tableExists('organizations'):
+            self._createOrganizationsTable()
+        if not self._tableExists('user_organizations'):
+            self._createUserOrganizationsTable()
+
+        self.executeSql("SELECT id FROM organizations ORDER BY id LIMIT 1")
+        row = self.cursor.fetchone()
+        if row:
+            return row[0]
+
+        self.executeSql(
+            "INSERT INTO organizations (name, slug) VALUES (%s, %s) RETURNING id",
+            ('Default', 'default'),
+        )
+        org_id = self.cursor.fetchone()[0]
+        self.connection.commit()
+        logging.info("Created default organization id=%s", org_id)
+        return org_id
+
+    def _pickBackfillOrganizationId(self, fallback: int) -> int:
+        """
+        Choose which org owns pre-multi-tenant rows.
+
+        Preference: ORGANIZATION_ID env → VYS → Default → fallback / first org.
+        """
+        env_org = os.environ.get('ORGANIZATION_ID')
+        if env_org:
+            return int(env_org)
+
+        orgs = self.getOrganizations()
+        if not orgs:
+            return fallback
+
+        for org in orgs:
+            slug = (org.get('slug') or '').lower()
+            name = (org.get('name') or '').lower()
+            if slug == 'vys' or name == 'vys' or 'vys' in name.split():
+                return org['id']
+
+        for org in orgs:
+            if org.get('slug') == 'default' or org.get('name') == 'Default':
+                return org['id']
+
+        return orgs[0]['id']
+
+    def _addOrganizationIdColumn(self, table_name: str, default_org_id: int) -> None:
+        """Add organization_id to an existing table, backfill, and set NOT NULL."""
+        if not self._tableExists(table_name):
+            return
+        if self._columnExists(table_name, 'organization_id'):
+            # Backfill any NULLs left from a partial prior migration
+            self.executeSql(
+                f"UPDATE {table_name} SET organization_id = %s WHERE organization_id IS NULL",
+                (default_org_id,),
+            )
+            return
+
+        logging.info(
+            "Migrating %s: adding organization_id (backfill org_id=%s)",
+            table_name,
+            default_org_id,
+        )
+        self.executeSql(f"ALTER TABLE {table_name} ADD COLUMN organization_id INTEGER")
+        self.executeSql(
+            f"UPDATE {table_name} SET organization_id = %s WHERE organization_id IS NULL",
+            (default_org_id,),
+        )
+        self.executeSql(f"ALTER TABLE {table_name} ALTER COLUMN organization_id SET NOT NULL")
+        try:
+            self.executeSql(
+                f"""
+                ALTER TABLE {table_name}
+                ADD CONSTRAINT {table_name}_organization_id_fkey
+                FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+                """
+            )
+        except Exception as ex:
+            # Constraint may already exist or CRDB may name it differently — non-fatal
+            logging.warning("Could not add FK on %s.organization_id: %s", table_name, ex)
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
+        logging.info("Migrated %s.organization_id", table_name)
+
+    def _migrateUsersNameColumns(self) -> None:
+        """Ensure users.first_name / users.last_name exist (required for mentor UI queries)."""
+        if not self._tableExists('users'):
+            return
+
+        added = False
+        if not self._columnExists('users', 'first_name'):
+            self.executeSql("ALTER TABLE users ADD COLUMN first_name TEXT")
+            logging.info("Added users.first_name")
+            added = True
+        if not self._columnExists('users', 'last_name'):
+            self.executeSql("ALTER TABLE users ADD COLUMN last_name TEXT")
+            logging.info("Added users.last_name")
+            added = True
+
+        # Prefer names from legacy mentors table when usernames align with mentor first names
+        if self._tableExists('mentors'):
+            try:
+                self.executeSql(
+                    """
+                    UPDATE users u
+                    SET first_name = COALESCE(NULLIF(TRIM(u.first_name), ''), m.mentor_first_name),
+                        last_name = COALESCE(NULLIF(TRIM(u.last_name), ''), m.mentor_last_name)
+                    FROM mentors m
+                    WHERE LOWER(u.username) = LOWER(m.mentor_first_name)
+                       OR LOWER(u.username) = LOWER(CONCAT(m.mentor_first_name, m.mentor_last_name))
+                       OR LOWER(u.username) = LOWER(CONCAT(m.mentor_first_name, '-', m.mentor_last_name))
+                       OR LOWER(u.username) = LOWER(CONCAT(m.mentor_first_name, '.', m.mentor_last_name))
+                    """
+                )
+            except Exception as ex:
+                logging.warning("Could not backfill user names from mentors table: %s", ex)
+
+        # Last resort so getMentors() returns rows: use username for blank names
+        self.executeSql(
+            """
+            UPDATE users
+            SET first_name = COALESCE(NULLIF(TRIM(first_name), ''), username),
+                last_name = COALESCE(NULLIF(TRIM(last_name), ''), username)
+            WHERE COALESCE(TRIM(first_name), '') = ''
+               OR COALESCE(TRIM(last_name), '') = ''
+            """
+        )
+        if added:
+            logging.info("Migrated users name columns")
+
+    def _migrateMultiTenantSchema(self) -> None:
+        """
+        Bring a restored / pre-multi-tenant database up to the org-scoped schema.
+
+        Creates org tables if missing, seeds a Default org when empty, and adds
+        organization_id to referees / gamedetails / mentor_game_selections.
+        """
+        try:
+            default_org_id = self._ensureOrganizationsSeeded()
+            default_org_id = self._pickBackfillOrganizationId(fallback=default_org_id)
+
+            for table in ('referees', 'gamedetails', 'mentor_game_selections'):
+                self._addOrganizationIdColumn(table, default_org_id)
+
+            self._migrateUsersNameColumns()
+
+            # Attach existing users to the default org when they have no memberships
+            if self._tableExists('users') and self._tableExists('user_organizations'):
+                self.executeSql(
+                    """
+                    INSERT INTO user_organizations (user_id, organization_id)
+                    SELECT u.id, %s FROM users u
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM user_organizations uo WHERE uo.user_id = u.id
+                    )
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (default_org_id,),
+                )
+
+            self.connection.commit()
+            logging.info(
+                "Multi-tenant schema migration complete (default_org_id=%s)",
+                default_org_id,
+            )
+        except Exception as e:
+            logging.error("Error migrating multi-tenant schema: %s", e, exc_info=True)
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
+
 
     def _connectToDb(self):
         self.connection = psycopg.connect(os.environ['db_url'])
@@ -224,6 +432,8 @@ class RefereeDbCockroach(object):
                                      salt TEXT NOT NULL,
                                      email TEXT UNIQUE NOT NULL,
                                      role TEXT NOT NULL DEFAULT 'user',
+                                     first_name TEXT,
+                                     last_name TEXT,
                                      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                                      last_login TIMESTAMP)"""
         self.executeSql(sql)
