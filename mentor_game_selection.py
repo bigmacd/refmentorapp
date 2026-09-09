@@ -14,7 +14,10 @@ from nicegui import ui
 class MentorGameSelection:
     """Component for mentors to select games they want to mentor"""
 
-    def __init__(self, db, auth_manager, all_match_data, dates, logger=None, get_match_data: Optional[Callable[[], Tuple[Any, list]]] = None):
+    def __init__(self, db, auth_manager, all_match_data, dates, logger=None,
+                 get_match_data: Optional[Callable[[], Tuple[Any, list]]] = None,
+                 ensure_match_data: Optional[Callable[[], None]] = None,
+                 ensure_workload: Optional[Callable[[], None]] = None):
         """
         Initialize the mentor game selection component
 
@@ -31,9 +34,17 @@ class MentorGameSelection:
         self.all_match_data = all_match_data
         self.dates = dates
         self.get_match_data = get_match_data
+        self.ensure_match_data = ensure_match_data
+        self.ensure_workload = ensure_workload
         self.logger = logger or logging.getLogger(__name__)
         self.current_user = None
         self.current_mentor_name = None
+
+    def _current_org_id(self) -> int:
+        org_id = self.auth_manager.get_current_organization_id()
+        if org_id is not None:
+            return org_id
+        return self.db.getDefaultOrganizationId()
 
     def _get_weekend_dates(self):
         """Filter dates to show only Friday, Saturday, Sunday"""
@@ -45,7 +56,7 @@ class MentorGameSelection:
 
     def _get_game_selections_for_date(self, date_str):
         """Get all mentor selections for a specific date"""
-        selections = self.db.getMentorGameSelections(game_date=date_str)
+        selections = self.db.getMentorGameSelections(game_date=date_str, organization_id=self._current_org_id())
         # Organize by venue -> game_id -> list of mentors
         selections_dict = {}
         for sel in selections:
@@ -72,10 +83,11 @@ class MentorGameSelection:
             ui.notify('Invalid mentor name', type='negative')
             return
 
+        org_id = self._current_org_id()
         if is_checked:
             # Add selection
             success, message = self.db.addMentorGameSelection(
-                firstname, lastname, game_date, venue, game_id
+                firstname, lastname, game_date, venue, game_id, org_id
             )
             if success:
                 ui.notify(message, type='positive')
@@ -84,7 +96,7 @@ class MentorGameSelection:
         else:
             # Remove selection
             success, message = self.db.removeMentorGameSelection(
-                firstname, lastname, game_date, venue, game_id
+                firstname, lastname, game_date, venue, game_id, org_id
             )
             if success:
                 ui.notify(message, type='positive')
@@ -92,7 +104,7 @@ class MentorGameSelection:
                 ui.notify(message, type='warning')
 
         # Update the "Selected by" display
-        selected_mentors = self.db.getGameSelectionsByGame(game_date, venue, game_id)
+        selected_mentors = self.db.getGameSelectionsByGame(game_date, venue, game_id, org_id)
         if selected_mentors:
             selected_by_label.text = 'Selected by: ' + ', '.join(selected_mentors)
             selected_by_label.classes('text-xs text-green-600')
@@ -240,13 +252,35 @@ class MentorGameSelection:
         return weekends
 
 
+    def _ensure_workload_for_org(self):
+        cached_org = getattr(ui, 'resultsFromRunOrgId', None)
+        if cached_org != self._current_org_id() and self.ensure_workload:
+            try:
+                self.ensure_workload()
+            except Exception as e:
+                self.logger.debug('ensure_workload failed: %s', e)
+
+    def _ensure_match_data_loaded(self):
+        if self.all_match_data is not None:
+            return
+        if self.ensure_match_data:
+            try:
+                self.ensure_match_data()
+            except Exception as e:
+                self.logger.debug('ensure_match_data failed: %s', e)
+        if self.get_match_data:
+            data, dates = self.get_match_data()
+            self.all_match_data = data
+            self.dates = dates or (list(data.keys()) if data else [])
+
     def render(self):
         """Render the mentor game selection interface"""
+        self._ensure_workload_for_org()
         # Get current user and determine mentor name
         self.current_user = self.auth_manager.get_current_user()
 
         # Get mentors list
-        mentors = self.db.getMentors()
+        mentors = self.db.getMentors(self._current_org_id())
         mentor_values = sorted([f'{m[0].capitalize()} {m[1].capitalize()}' for m in mentors])
 
         # Filter to current user if not admin
@@ -261,19 +295,16 @@ class MentorGameSelection:
             ui.label('Select Games to Mentor').classes('text-xl font-bold mb-4')
             ui.label(f'Mentor: {self.current_mentor_name}').classes('mb-4 font-semibold')
 
-            # Check if data is loaded
-            if not self.all_match_data:
+            # Check if data is loaded into memory (disk cache may exist before load_data runs)
+            if self.all_match_data is None:
                 with ui.column().classes('items-center justify-center p-8'):
                     ui.spinner(size='lg')
                     ui.label('Loading game data...').classes('mt-4 text-gray-600')
                     ui.label('Checking every few seconds. Data will appear when ready.').classes('text-sm text-gray-500 mt-2')
 
                 def check_match_data_loaded():
-                    if self.get_match_data:
-                        data, dates = self.get_match_data()
-                        self.all_match_data = data
-                        self.dates = dates or (list(data.keys()) if data else [])
-                    if self.all_match_data:
+                    self._ensure_match_data_loaded()
+                    if self.all_match_data is not None:
                         card.clear()
                         with card:
                             ui.label('Select Games to Mentor').classes('text-xl font-bold mb-4')
@@ -283,6 +314,10 @@ class MentorGameSelection:
                         ui.timer(0.5, check_match_data_loaded, once=True)
 
                 ui.timer(0.5, check_match_data_loaded, once=True)
+                return
+
+            if not self.all_match_data:
+                ui.label('No games are scheduled for this organization yet.').classes('text-gray-500 mt-4')
                 return
 
             self._render_content_after_header()
@@ -359,24 +394,36 @@ class MentorGameSelection:
                 ui.label('Please wait while the workload data is being generated.').classes('text-sm text-gray-500 mt-2')
 
             def check_results_ready():
-                if hasattr(ui, 'resultsFromRun'):
+                if self.ensure_workload:
+                    try:
+                        self.ensure_workload()
+                    except Exception as e:
+                        self.logger.debug('ensure_workload failed: %s', e)
+                if hasattr(ui, 'resultsFromRun') and ui.resultsFromRun is not None:
                     loading_container.clear()
                     loading_container.classes('w-full')
                     with loading_container:
-                        for date in thisWeekendDates:
-                            newRefRecords = extractNewRefRecords(date)
-                            if newRefRecords is None or len(newRefRecords) == 0:
-                                continue
-                            self._render_day_section(date, newRefRecords)
+                        self._render_weekend_games(thisWeekendDates, extractNewRefRecords)
                 else:
                     ui.timer(0.5, check_results_ready, once=True)
 
             ui.timer(0.5, check_results_ready, once=True)
             return
 
-        # Data is already available, render immediately
-        for date in thisWeekendDates:
-            newRefRecords = extractNewRefRecords(date)
-            if newRefRecords is None or len(newRefRecords) == 0:
+        self._render_weekend_games(thisWeekendDates, extractNewRefRecords)
+
+    def _render_weekend_games(self, weekend_dates, extract_new_ref_records):
+        """Render game sections for the weekend, or a clear message if none qualify."""
+        rendered_any = False
+        for date in weekend_dates:
+            new_ref_records = extract_new_ref_records(date)
+            if not new_ref_records:
                 continue
-            self._render_day_section(date, newRefRecords)
+            self._render_day_section(date, new_ref_records)
+            rendered_any = True
+
+        if not rendered_any:
+            ui.label(
+                'No games with new referees for the upcoming weekend. '
+                'This is normal before the season starts or when the workload has no new-ref assignments.'
+            ).classes('text-gray-500 mt-4')

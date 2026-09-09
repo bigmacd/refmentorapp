@@ -1,89 +1,43 @@
-import argparse
-import datetime
-from datetime import timedelta, datetime
+import os
+import logging
 from typing import Optional
 from io import StringIO
 from contextlib import redirect_stdout
-import mechanicalsoup
-import os
-import logging
 
 from database import RefereeDbCockroach
-from refWebSites import MySoccerLeague
-from googleSheets import getRefsFromGoogleSignupSheet
+from assignment_providers import (
+    get_workload_config,
+    get_assignment_provider,
+    sync_new_referees,
+)
+from data_store import allow_live_fetch, has_workload, load_workload
 
 logger = logging.getLogger(__name__)
 
-def getRealTimeCurrentRefAssignments(br: mechanicalsoup.stateful_browser.StatefulBrowser) -> dict:
-    """
-    Log into the MySoccerLeague website and pull all assignments for the weekend"""
-    try:
-        site = MySoccerLeague(br)
-        site.setSpecificDate(datetime.now() - timedelta(days=1))
-        assignments = site.getAssignments()
-        return assignments
-    except RuntimeError as e:
-        logger.error(f"Failed to get current assignments: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error getting assignments: {e}")
-        raise RuntimeError(f"Failed to retrieve assignments from MySoccerLeague: {e}") from e
 
-
-def getPastAssignments(br: mechanicalsoup.stateful_browser.StatefulBrowser, d: datetime.date) -> dict:
-    try:
-        site = MySoccerLeague(br)
-        site.setSpecificDate(d)
-        return site.getAssignments()
-    except RuntimeError as e:
-        logger.error(f"Failed to get past assignments for {d}: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error getting past assignments: {e}")
-        raise RuntimeError(f"Failed to retrieve past assignments from MySoccerLeague: {e}") from e
-
-
-def getAllRefereesFromSite(br: mechanicalsoup.stateful_browser.StatefulBrowser) -> list:
-    try:
-        site = MySoccerLeague(br)
-        return site.getAllReferees()
-    except RuntimeError as e:
-        logger.error(f"Failed to get referees from site: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error getting referees: {e}")
-        raise RuntimeError(f"Failed to retrieve referees from MySoccerLeague: {e}") from e
-
-
-def getRefsAlreadyMentored() -> dict:
-    """
-    Pull the names of all referees already mentored this season
-    """
+def getRefsAlreadyMentored(organization_id: int = None) -> dict:
+    """Pull the names of all referees already mentored this season."""
     db = RefereeDbCockroach()
-    return db.getMentoringSessions()
+    return db.getMentoringSessions(organization_id)
 
 
 def adjustDbNewRefs(inRefs: list) -> list:
-    # convert from list of tuples to list of strings
-    # [( 'martin', 'cooley')] -> [('martin cooley')]
     retVal = []
     for ref in inRefs:
         retVal.append(f'{ref[0]} {ref[1]}')
     return retVal
 
 
-def getRiskyRefs() -> list:
+def getRiskyRefs(organization_id: int = None) -> list:
     retVal = []
     db = RefereeDbCockroach()
-    refs = db.getRisky()
+    refs = db.getRisky(organization_id)
     for ref in refs:
         retVal.append(f'{ref[1]} {ref[0]}')
     return retVal
 
 
 def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list) -> dict:
-
-    minimizeOutput = os.environ.get('MINIMIZE_OUTPUT', 'false').lower() == 'true'
 
     current = {}
     for c in sorted(currentu):
@@ -120,6 +74,7 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
             # if the crew is new and has already been mentored (but not flagged as needed follow-up), skip
             enabled = os.getenv("showmentored", "").lower() in ("true", "1", "yes")
             if not enabled:
+
                 if center in newRefs:
                     if cmarker == '**' and crisky == '':
                         newRefs.remove(center)
@@ -132,8 +87,6 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
                 if center not in newRefs and ar1 not in newRefs and ar2 not in newRefs:
                     continue
 
-
-
             if not fieldsOnce:
                 print("")
                 print(f'Field: {field}')
@@ -144,7 +97,6 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
             age = details[game]['age']
             level = details[game]['level']
 
-            # looking to return this data as well as "print"
             if field not in retVal:
                 retVal[field] = {}
 
@@ -186,9 +138,10 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
 
 class WorkloadGenerator:
     """
-    Singleton class for generating workload data.
-    Prevents multiple data gathering operations and caches the output.
+    Singleton class for generating workload data per organization.
+    Prevents duplicate scrapes and caches output keyed by organization_id.
     """
+
     _instance: Optional['WorkloadGenerator'] = None
     _initialized: bool = False
 
@@ -199,157 +152,142 @@ class WorkloadGenerator:
 
     def __init__(self):
         if not self._initialized:
-            self._output: Optional[str] = None
-            self._is_generating: bool = False
-            self._db: Optional[RefereeDbCockroach] = None
+            self._cache: dict[int, tuple[str, dict]] = {}
+            self._generating: set[int] = set()
             self._initialized = True
 
-    def _generate_workload_data(self) -> str:
-        """
-        Internal method to generate workload data.
-        Returns the output as a string.
-        """
-        # Capture stdout
+    def _generate_workload_data(self, organization_id: int) -> tuple[str, dict]:
         stdout_capture = StringIO()
 
         with redirect_stdout(stdout_capture):
-            # adding this line to try to fix the deployment on streamlit.app
             db = RefereeDbCockroach()
+            org = db.getOrganizationById(organization_id)
+            if not org:
+                raise ValueError(f'Organization id {organization_id} not found')
 
-            """
-            Make sure database is up-to-date with VYS new referee spreadsheet
-            """
-            latestRefsFromSpreadsheet = getRefsFromGoogleSignupSheet()
-            # returns list of tuples (lastname, firstname, year_certified)
+            config = get_workload_config(org)
+            print(
+                f"Generating workload for organization: {org['name']} "
+                f"(id={organization_id}, provider={config.provider})"
+            )
 
-            for ref in latestRefsFromSpreadsheet:
-                if not db.refExists(ref[0], ref[1]):
-                    print(f"{ref[1].capitalize()} {ref[0].capitalize()} not in database, adding")
-                    db.addReferee(ref[0], ref[1], ref[2])
+            provider = get_assignment_provider(config)
+            if provider is None:
+                print(
+                    f"No assignment provider is configured for {org['name']}. "
+                    "Workload generation is not available for this organization yet."
+                )
+                return stdout_capture.getvalue(), {}
 
-            """
-            Retrieve referees from MSL
-            """
-            br = mechanicalsoup.StatefulBrowser(soup_config={'features': 'lxml'})
-            br.addheaders = [('User-agent', 'Chrome')]
+            sync_new_referees(db, config)
 
-            allRefsFromMSL = getAllRefereesFromSite(br)
-            # return list of tuples (firstname, lastname)
+            all_refs_from_site = provider.get_all_referees()
 
-            # This was a one-time thing?
-            # """
-            # Update database with MSL referee list
-            # """
-            # for ref in allRefs:
-            #     if not db.refExists(ref[1], ref[0]):
-            #         print(f"missing ref: {ref[1]} {ref[0]}") #db.addReferee(ref[1], ref[0], 2000)
+            new_refs = db.getNewReferees(organization_id)
+            for ref in new_refs:
+                if ref not in all_refs_from_site:
+                    print(f'Referee: {ref[0]} {ref[1]} not on assignment platform, check name spelling')
 
-            """
-            Verify new referees have the same first and last name in MSL.
-            """
-            newRefs = db.getNewReferees()
-            # returns list of tuples (firstname, lastname)
+            current = provider.get_current_assignments()
+            db.addGameDetails(current, organization_id)
 
-            for ref in newRefs:
-                if ref not in allRefsFromMSL:
-                    print(f'Referee: {ref[0]} {ref[1]} not in MSL, check name spelling')
+            mentored = getRefsAlreadyMentored(organization_id)
+            risky = getRiskyRefs(organization_id)
+            new_refs = adjustDbNewRefs(new_refs)
 
-            # get this week's current assignments
-            current = getRealTimeCurrentRefAssignments(br)
-            db.addGameDetails(current)
+            results_from_run = generateWorkload(current, new_refs, mentored, risky)
 
-            # get list of already mentored referees
-            mentored = getRefsAlreadyMentored()
+        return stdout_capture.getvalue(), results_from_run
 
-            # get the list of risky refs (those needing to be seen again)
-            risky = getRiskyRefs()
+    def generate_and_persist(self, organization_id: int) -> tuple[str, dict]:
+        """Run a live workload generation (used by sync_worker). Does not use filesystem cache."""
+        if organization_id in self._generating:
+            raise RuntimeError(f'Workload generation already in progress for org {organization_id}')
 
-            # first adjust the format of data in newRefs from list of tuples
-            # (firstname, lastname) to list of strings "firstname lastname"
-            newRefs = adjustDbNewRefs(newRefs)
+        self._generating.add(organization_id)
+        try:
+            logger.info('Generating workload data for organization_id=%s', organization_id)
+            output, results = self._generate_workload_data(organization_id)
+            self._cache[organization_id] = (output, results)
+            return output, results
+        finally:
+            self._generating.discard(organization_id)
 
-            resultsFromRun = generateWorkload(current, newRefs, mentored, risky)
+    def _load_from_store(self, organization_id: int) -> Optional[tuple[str, dict]]:
+        cached = load_workload(organization_id)
+        if cached is not None:
+            self._cache[organization_id] = cached
+        return cached
 
-        return stdout_capture.getvalue(), resultsFromRun
+    def get_workload_output(self, organization_id: int, force_refresh: bool = False) -> str:
+        if not force_refresh:
+            cached = self._load_from_store(organization_id)
+            if cached is not None:
+                return cached[0]
 
-    def get_workload_output(self, force_refresh: bool = False) -> str:
-        """
-        Get the workload output. Generates data if not cached or if forced.
+        if not allow_live_fetch():
+            if organization_id in self._cache:
+                return self._cache[organization_id][0]
+            raise RuntimeError(
+                'Workload data is not available yet. '
+                'The sync worker will populate the cache shortly.'
+            )
 
-        Args:
-            force_refresh: If True, regenerate data even if cached
+        if force_refresh or organization_id not in self._cache:
+            if organization_id in self._generating:
+                logger.warning(
+                    'Workload generation already in progress for org %s, returning cached data',
+                    organization_id,
+                )
+                cached = self._cache.get(organization_id)
+                return cached[0] if cached else 'Workload generation in progress...'
 
-        Returns:
-            str: The workload output as a string
-        """
-        if force_refresh or self._output is None:
-            if self._is_generating:
-                # If already generating, wait a bit and return cached or empty
-                logger.warning("Workload generation already in progress, returning cached data")
-                return self._output or "Workload generation in progress..."
-
-            self._is_generating = True
+            self._generating.add(organization_id)
             try:
-                logger.info("Generating workload data...")
-                self._output, self.resultsFromRun = self._generate_workload_data()
-                logger.info("Workload data generated successfully")
+                logger.info('Generating workload data for organization_id=%s', organization_id)
+                self._cache[organization_id] = self._generate_workload_data(organization_id)
+                logger.info('Workload data generated successfully for organization_id=%s', organization_id)
             except Exception as e:
-                logger.error(f"Error generating workload data: {e}", exc_info=True)
+                logger.error('Error generating workload data: %s', e, exc_info=True)
                 raise
             finally:
-                self._is_generating = False
+                self._generating.discard(organization_id)
 
-        return self._output
+        return self._cache[organization_id][0]
 
-    def clear_cache(self):
-        """Clear the cached workload output"""
-        self._output = None
-        logger.info("Workload cache cleared")
+    def get_workload_results(self, organization_id: int, force_refresh: bool = False) -> dict:
+        if not force_refresh:
+            cached = self._load_from_store(organization_id)
+            if cached is not None:
+                return cached[1]
+
+        self.get_workload_output(organization_id, force_refresh=force_refresh)
+        return self._cache.get(organization_id, ('', {}))[1]
+
+    def clear_cache(self, organization_id: int = None):
+        if organization_id is None:
+            self._cache.clear()
+            logger.info('Workload cache cleared for all organizations')
+        else:
+            self._cache.pop(organization_id, None)
+            logger.info('Workload cache cleared for organization_id=%s', organization_id)
 
 
-# Convenience function for backward compatibility
-def run() -> dict:
-    """
-    Generate workload data and print to stdout.
-    Maintains backward compatibility with existing code.
-    """
+def resolve_workload_organization_id(db: RefereeDbCockroach, organization_id: int = None) -> int:
+    if organization_id is not None:
+        return organization_id
+    return db.getDefaultOrganizationId()
+
+
+def run(organization_id: int = None) -> dict:
+    """Generate workload for an organization and return structured results."""
+    db = RefereeDbCockroach()
+    org_id = resolve_workload_organization_id(db, organization_id)
     generator = WorkloadGenerator()
-    output = generator.get_workload_output()
+    output = generator.get_workload_output(org_id)
     print(output, end='')
-    return generator.resultsFromRun
-
-def getEmails():
-    try:
-        br = mechanicalsoup.StatefulBrowser(soup_config={ 'features': 'lxml'})
-        br.addheaders = [('User-agent', 'Chrome')]
-        site = MySoccerLeague(br)
-        _ = site.getAllReferees()
-        return site.emails
-    except RuntimeError as e:
-        logger.error(f"Failed to get emails: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error getting emails: {e}")
-        raise RuntimeError(f"Failed to retrieve emails from MySoccerLeague: {e}") from e
+    return generator.get_workload_results(org_id)
 
 
-
-if __name__ == "__main__":
-    bademails = [
-        os.environ.get('badmentor1'),
-        os.environ.get('badmentor2'),
-        os.environ.get('badmentor3')
-    ]
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-e', action="store_true")
-    args = parser.parse_args()
-    if args.e is True:
-        emails = getEmails()
-        emails = sorted(emails)
-        print(f"Retrieved {len(emails)} email addresses from MSL")
-        for x, email in enumerate(emails):
-            if email in bademails:
-                continue
-            print(email)
-    else:
-        _ = run()
+if __name__ == '__main__':
+    run()

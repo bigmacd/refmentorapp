@@ -1,3 +1,4 @@
+from collections import Counter
 import os
 import mechanicalsoup
 
@@ -13,22 +14,23 @@ def retrieveEmails():
 
 
 def main():
-    bademails = [
-        os.environ.get('badmentor1'),
-        os.environ.get('badmentor2'),
-        os.environ.get('badmentor3')
-    ]
-
+    excludedEmails = os.environ.get('excludedEmails', '').split(',')
+    excludeEmails = [email.strip() for email in excludedEmails]
     emails = retrieveEmails()
     emails = sorted(emails)
     print(f"Retrieved {len(emails)} email addresses from MSL")
+
+    counts = Counter(emails)
+    dups = {email: count for email, count in counts.items() if count > 1}
+    for k, v in dups.items():
+        print(f"Duplicate email: {k} appears {v} times")
 
     # dedup the list
     uniqueEmails = list(set(emails))
     print(f"Deduped { len(emails) - len(uniqueEmails) } email addresses")
 
     for email in uniqueEmails:
-        if email in bademails:
+        if email in excludeEmails:
             continue
         print(email)
 

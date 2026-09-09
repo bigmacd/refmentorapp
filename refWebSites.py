@@ -9,6 +9,37 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 logger = logging.getLogger(__name__)
 
+# Rare given-name pairs that should stay in firstname (not get absorbed into lastname).
+_DOUBLE_FIRSTS = {
+    ('mary', 'kate'),
+}
+
+
+def split_referee_name(full_name: str) -> tuple[str, str]:
+    """
+    Split an MSL display name into (firstname, lastname).
+
+    Convention used throughout this app: first token is the given name;
+    everything else (middle names, particles, suffixes like III/Jr) goes in lastname.
+    """
+    parts = [p.strip(',') for p in full_name.split() if p.strip()]
+    if not parts:
+        raise ValueError(f'empty referee name: {full_name!r}')
+
+    if len(parts) == 1:
+        token = parts[0].lower()
+        return token, token
+
+    if len(parts) >= 2 and (parts[0].lower(), parts[1].lower()) in _DOUBLE_FIRSTS:
+        first = f'{parts[0]} {parts[1]}'
+        last = ' '.join(parts[2:]) if len(parts) > 2 else parts[1]
+    else:
+        first = parts[0]
+        last = ' '.join(parts[1:])
+
+    return first.lower().strip(), last.lower().strip()
+
+
 class RefereeWebSite(object):
 
     def __init__(self, br):
@@ -112,7 +143,6 @@ class MySoccerLeague(RefereeWebSite):
             if len(links) < 14:
                 raise IndexError(f"Expected at least 14 links, found {len(links)}")
             self._loginKey = links[13]['href'].split('?')[1].split('&')[0].split('=')[1]
-            logger.info(f"[_login] Step 5: Login key extracted successfully: {self._loginKey[:10]}...")
         except Exception as e:
             logger.error(f"[_login] Step 5 FAILED: Error extracting login key: {e}", exc_info=True)
             raise
@@ -382,92 +412,12 @@ class MySoccerLeague(RefereeWebSite):
                         refereeFullName = "Marco Tulio Montanes"
                     emails.append(elements[7].text)
                     try:
-                        firstName, lastName = refereeFullName.split(' ')
-                    except (ValueError, NameError):
-                        f, l, x = refereeFullName.split(' ')
-                        # handle weirdness in MSL (three part names, extra spaces, etc.)
+                        firstName, lastName = split_referee_name(refereeFullName)
+                    except ValueError as ex:
+                        logger.warning('Skipping unparseable referee name %r: %s', refereeFullName, ex)
+                        continue
+                    retVal.append((firstName, lastName))
 
-                        last = None
-
-                        if f == 'Russell':
-                            if x == 'Bower':
-                                last = x
-                        elif f == 'Alexandre':
-                            if l == 'de':
-                                last = l + ' ' + x
-                        elif f == 'Will':
-                            if l == 'Covey' and x == 'III':
-                                last = l + ' ' + x
-                        elif f == 'Gabriella':
-                            if l == '(Brie)':
-                                last = l + ' ' + x
-                        elif f == 'Sophie':
-                            if x == 'Hinton':
-                                last = x
-                        elif f == 'Vivienne':
-                            if x == 'Huang':
-                                last = x
-                        elif f == 'Andrew':
-                            if x == 'Teale':
-                                last = x
-                        elif f == 'Gabi':
-                            if x == 'Konde':
-                                last = x
-                        elif f == 'James':
-                            if x == 'Horn':
-                                last = f"{l} {x}"
-                        elif f == 'Joseph':
-                            if x == 'Sandoval':
-                                last = f"{l} {x}"
-                            elif x == 'Howe':
-                                last = f"{l} {x}"
-                        elif f == 'Mohamed':
-                            if l == 'Nour':
-                                last = f"{l} {x}"
-                        elif f == 'Jack':
-                            if x == 'Raaphorst':
-                                last = f"{l} {x}"
-                        elif f == 'Laith':
-                            if x == 'Habri':
-                                last = f"{l} {x}"
-                        elif f == 'William':
-                            if l == 'Covey,':
-                                if x == 'Jr':
-                                    l = l.strip(',')
-                                    last = f"{l} {x}"
-                        elif f == 'Sofia':
-                            if l == 'Velasquez':
-                                last = f"{l} {x}"
-                        elif f == 'Martiel':
-                            if l == 'Ruiz':
-                                last = f"{l} {x}"
-                        elif f == 'Michael':
-                            if l == 'Aguilera':
-                                if x == 'Jr.':
-                                    last = f"{l} {x}"
-                        elif f == 'Mary':
-                            if l == 'Kate':
-                                f = f"{f} {l}"
-                                last = x
-                        elif f == "Tyler":
-                            if x == "Pechenik":
-                                last = x
-                        elif f == 'Rayan':
-                            if x == 'Hababi':
-                                last = f"{l} {x}"
-                        elif f == 'Ismail':
-                            if x == 'chokhmany':
-                                last = f"{l} {x}"
-                        else:
-                            print(f'Error parsing: {refereeFullName}: f: {f} l: {l} x:{x}')
-
-                        if last is None:
-                            print(f'Error parsing: {refereeFullName}: f: {f} l: {l}, x:{x}')
-                        else:
-                            retVal.append((f.lower().strip(), last.lower().strip()))
-
-                    else:
-                        retVal.append((firstName.lower().strip(), lastName.lower().strip()))
 
             except Exception:
                 time.sleep(3)
@@ -577,3 +527,15 @@ class MySoccerLeague(RefereeWebSite):
         return metrics
 
 
+
+def main():
+    import mechanicalsoup
+    br = mechanicalsoup.StatefulBrowser(soup_config={ 'features': 'lxml'})
+    br.addheaders = [('User-agent', 'Chrome')]
+    site = MySoccerLeague(br)
+
+    site.getAllReferees()
+    print('end of program')
+
+if __name__ == "__main__":
+    main()
