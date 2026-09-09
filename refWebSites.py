@@ -378,10 +378,12 @@ class MySoccerLeague(RefereeWebSite):
                 for entry in entries:
                     elements = entry.find_all('td')
                     refereeFullName = elements[4].text
+                    if refereeFullName.startswith("Marco"):
+                        refereeFullName = "Marco Tulio Montanes"
                     emails.append(elements[7].text)
                     try:
                         firstName, lastName = refereeFullName.split(' ')
-                    except ValueError:
+                    except (ValueError, NameError):
                         f, l, x = refereeFullName.split(' ')
                         # handle weirdness in MSL (three part names, extra spaces, etc.)
 
@@ -464,8 +466,8 @@ class MySoccerLeague(RefereeWebSite):
                         else:
                             retVal.append((f.lower().strip(), last.lower().strip()))
 
-
-                    retVal.append((firstName.lower().strip(), lastName.lower().strip()))
+                    else:
+                        retVal.append((firstName.lower().strip(), lastName.lower().strip()))
 
             except Exception:
                 time.sleep(3)
