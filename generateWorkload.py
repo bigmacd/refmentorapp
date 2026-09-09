@@ -118,7 +118,8 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
 
             # trying to reduce output a bit
             # if the crew is new and has already been mentored (but not flagged as needed follow-up), skip
-            if not os.environ.get('showmentored', False):
+            enabled = os.getenv("showmentored", "").lower() in ("true", "1", "yes")
+            if not enabled:
                 if center in newRefs:
                     if cmarker == '**' and crisky == '':
                         newRefs.remove(center)
