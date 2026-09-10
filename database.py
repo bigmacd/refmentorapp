@@ -3,8 +3,10 @@ import os
 import logging
 import re
 import psycopg
-from typing import Tuple, Optional, Any
+from typing import Tuple, Optional, Any, List
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from report_sessions import MentoringSessionRow, rows_from_db_tuples, text_from_session_rows
 
 
 class RefereeDbCockroach(object):
@@ -660,6 +662,35 @@ class RefereeDbCockroach(object):
         r = self.executeSql(sql, (org_id,))
         return r.fetchall()
 
+    def _mentor_name_select_sql(self) -> str:
+        """Mentor display columns for report queries (users and/or legacy mentors)."""
+        if self._tableExists('mentors'):
+            return (
+                "COALESCE(me.last_name, m.mentor_last_name) AS mentor_last_name, "
+                "COALESCE(me.first_name, m.mentor_first_name) AS mentor_first_name"
+            )
+        return "me.last_name AS mentor_last_name, me.first_name AS mentor_first_name"
+
+    def _mentor_join_sql(self) -> str:
+        """
+        mentor_sessions.mentor historically referenced mentors.id; newer rows use users.id.
+        Join both when the legacy table exists so reports resolve either id space.
+        """
+        if self._tableExists('mentors'):
+            return (
+                "LEFT JOIN mentors m ON ms.mentor = m.id "
+                "LEFT JOIN users me ON ms.mentor = me.id"
+            )
+        return "LEFT JOIN users me ON ms.mentor = me.id"
+
+    def _mentor_name_match_sql(self) -> str:
+        if self._tableExists('mentors'):
+            return (
+                "LOWER(COALESCE(me.first_name, m.mentor_first_name)) = %s "
+                "AND LOWER(COALESCE(me.last_name, m.mentor_last_name)) = %s"
+            )
+        return "LOWER(me.first_name) = %s AND LOWER(me.last_name) = %s"
+
 
     # def getMentoringSessions(self) -> dict:
 
@@ -728,10 +759,12 @@ class RefereeDbCockroach(object):
 
         org_id = self._resolve_organization_id(organization_id)
         range = [f'{year}-01-01', f'{year}-12-31']
-        sql = """select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name,
+        sql = f"""select r.firstname, r.lastname, ms.position, ms.date, ms.comments,
+              {self._mentor_name_select_sql()},
               gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level
               from mentor_sessions ms
-              join referees r on ms.mentee = r.id left join users me on ms.mentor = me.id
+              join referees r on ms.mentee = r.id
+              {self._mentor_join_sql()}
               left join gamedetails gd on ms.gameid = gd.gameid and gd.organization_id = %s
               where ms.date between %s and %s and r.organization_id = %s ORDER BY ms.date"""
         r = self.executeSql(sql, (org_id, range[0], range[1], org_id))
@@ -743,9 +776,12 @@ class RefereeDbCockroach(object):
         # week string is like "Friday, April 14, 2023"
         d = datetime.strptime(week, "%A, %B %d, %Y")
         dt = d.strftime("%Y-%m-%d")
-        sql = """select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name,
-              gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level from mentor_sessions ms
-              join referees r on ms.mentee = r.id left join users me on ms.mentor = me.id
+        sql = f"""select r.firstname, r.lastname, ms.position, ms.date, ms.comments,
+              {self._mentor_name_select_sql()},
+              gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level
+              from mentor_sessions ms
+              join referees r on ms.mentee = r.id
+              {self._mentor_join_sql()}
               left join gamedetails gd on ms.gameid = gd.gameid and gd.organization_id = %s
               where ms.date = %s and r.organization_id = %s"""
         r = self.executeSql(sql, (org_id, dt, org_id))
@@ -756,9 +792,12 @@ class RefereeDbCockroach(object):
         org_id = self._resolve_organization_id(organization_id)
         # referee string is like "Kate Curby"
         firstname, lastname = referee.split(' ', 1)
-        sql = """select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name,
-              gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level from mentor_sessions ms
-              join referees r on ms.mentee = r.id left join users me on ms.mentor = me.id
+        sql = f"""select r.firstname, r.lastname, ms.position, ms.date, ms.comments,
+              {self._mentor_name_select_sql()},
+              gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level
+              from mentor_sessions ms
+              join referees r on ms.mentee = r.id
+              {self._mentor_join_sql()}
               left join gamedetails gd on ms.gameid = gd.gameid and gd.organization_id = %s
               where r.firstname = %s and r.lastname = %s and r.organization_id = %s
               order by ms.date"""
@@ -770,15 +809,20 @@ class RefereeDbCockroach(object):
         org_id = self._resolve_organization_id(organization_id)
         # mentor string is like "David Helfgott"
         firstname, lastname = mentor.split(' ', 1)
-        sql = """select r.firstname, r.lastname, ms.position, ms.date, ms.comments, me.last_name, me.first_name,
-              gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level from mentor_sessions ms
+        sql = f"""select r.firstname, r.lastname, ms.position, ms.date, ms.comments,
+              {self._mentor_name_select_sql()},
+              gd.gameid, gd.center, gd.ar1, gd.ar2, gd.date AS game_date, gd.venue, gd.time, gd.age, gd.level
+              from mentor_sessions ms
               join referees r on ms.mentee = r.id
-              join users me on ms.mentor = me.id
-              join user_organizations uo on me.id = uo.user_id and uo.organization_id = %s
+              {self._mentor_join_sql()}
               left join gamedetails gd on ms.gameid = gd.gameid and gd.organization_id = %s
-              where LOWER(me.first_name) = %s and LOWER(me.last_name) = %s and r.organization_id = %s
+              where {self._mentor_name_match_sql()}
+                and r.organization_id = %s
               order by ms.date"""
-        r = self.executeSql(sql, (org_id, org_id, firstname.lower(), lastname.lower(), org_id))
+        r = self.executeSql(
+            sql,
+            (org_id, firstname.lower(), lastname.lower(), org_id),
+        )
         return r.fetchall()
 
     def getYears(self, organization_id: int = None) -> list:
@@ -906,99 +950,36 @@ class RefereeDbCockroach(object):
             return (True, "Mentor Report successfully submitted!")
 
     def _getTextFromSessions(self, sessions):
+        """Backward-compatible text report from raw DB tuples."""
+        return text_from_session_rows(rows_from_db_tuples(sessions))
 
-        # TODO - use game details in the report if not null (from database left joining)
-        # These are the columns we have from the left join:
-        # firstname
-        # lastname
-        # position
-        # date
-        # comments
-        # mentor_last_name
-        # mentor_first_name
-        # gameid
-        # center
-        # ar1
-        # ar2
-        # game_date
-        # venue
-        # time
-        # age
-        # level
+    def sessions_to_rows(self, sessions) -> List[MentoringSessionRow]:
+        """Convert raw mentoring-session query tuples into structured rows."""
+        return rows_from_db_tuples(sessions)
 
-        retVal = ''
-        # [0] is firstname, [1] is lastname, [2] is position
-        # [3] is date and [4] is comments
-        sessionData = {}
+    def getYearReportRows(self, year, organization_id: int = None) -> List[MentoringSessionRow]:
+        return self.sessions_to_rows(self.getMentoringSessionDetails(year, organization_id))
 
-        for session in sessions:
-            date = session[3]
-            if date not in sessionData: # session[3] is date
-                sessionData[date] = []
+    def getWeekReportRows(self, week, organization_id: int = None) -> List[MentoringSessionRow]:
+        return self.sessions_to_rows(self.getMentoringsessionsForWeek(week, organization_id))
 
-            mentor_last = session[5].capitalize() if session[5] else 'Unknown'
-            mentor_first = session[6].capitalize() if session[6] else 'Mentor'
-            entry = {
-                    'ref': f'{session[0].capitalize()} {session[1].capitalize()}',
-                    'position': session[2],
-                    'mentor': f'{mentor_first} {mentor_last}',
-                    'comments': session[4],
-                    'gameid': session[7],
-                    'center': session[8],
-                    'ar1': session[9],
-                    'ar2': session[10],
-                    'game_date': session[11],
-                    'venue': session[12],
-                    'time': session[13],
-                    'age': session[14],
-                    'level': session[15]
-                }
-            sessionData[date].append(entry)
+    def getRefereeReportRows(self, referee, organization_id: int = None) -> List[MentoringSessionRow]:
+        return self.sessions_to_rows(self.getMentoringsessionsForReferee(referee, organization_id))
 
-        # build a big `ol string to returned as a download`
-        for k, entries in sessionData.items():
-            retVal += f'Date: {k}\r\n'
-            for entry in entries:
-                retVal += f"\tReferee: {entry['ref']}\r\n"
-                retVal += f"\tPosition: {entry['position']}\r\n"
-                retVal += f"\tMentor: {entry['mentor']}\r\n"
-                retVal += f"\tComments: {entry['comments']}\r\n\r\n"
-
-                if entry['gameid'] is not None:
-                    retVal += f"\tGame Details:\r\n"
-                    retVal += f"\t\tGame ID: {entry['gameid']}\r\n"
-                    retVal += f"\t\tCenter: {entry['center']}\r\n"
-                    retVal += f"\t\tAR1: {entry['ar1']}\r\n"
-                    retVal += f"\t\tAR2: {entry['ar2']}\r\n"
-                    retVal += f"\t\tGame Date: {entry['game_date']}\r\n"
-                    retVal += f"\t\tVenue: {entry['venue']}\r\n"
-                    retVal += f"\t\tTime: {entry['time']}\r\n"
-                    retVal += f"\t\tAge Group: {entry['age']}\r\n"
-                    retVal += f"\t\tLevel: {entry['level']}\r\n\r\n"
-
-        return retVal
-
+    def getMentorReportRows(self, mentor, organization_id: int = None) -> List[MentoringSessionRow]:
+        return self.sessions_to_rows(self.getMentoringsessionsForMentor(mentor, organization_id))
 
     def produceYearReport(self, year, organization_id: int = None):
-        sessions = self.getMentoringSessionDetails(year, organization_id)
-        return self._getTextFromSessions(sessions)
-
+        return text_from_session_rows(self.getYearReportRows(year, organization_id))
 
     def produceWeekReport(self, week, organization_id: int = None):
-        sessions = self.getMentoringsessionsForWeek(week, organization_id)
-        return self._getTextFromSessions(sessions)
-
+        return text_from_session_rows(self.getWeekReportRows(week, organization_id))
 
     def produceRefereeReport(self, referee, organization_id: int = None):
-        for name in referee:
-            name.lower()
-        sessions = self.getMentoringsessionsForReferee(referee, organization_id)
-        return self._getTextFromSessions(sessions)
-
+        return text_from_session_rows(self.getRefereeReportRows(referee, organization_id))
 
     def produceMentorReport(self, mentor, organization_id: int = None):
-        sessions = self.getMentoringsessionsForMentor(mentor, organization_id)
-        return self._getTextFromSessions(sessions)
+        return text_from_session_rows(self.getMentorReportRows(mentor, organization_id))
 
 
     # The below was added so we can also track the game details

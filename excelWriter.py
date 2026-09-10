@@ -1,5 +1,11 @@
 import math
+import io
+from typing import Iterable
+
 import xlsxwriter
+
+from report_sessions import EXPORT_COLUMNS, MentoringSessionRow, csv_ready_dicts
+
 
 """ This is the format of the data coming in:
 
@@ -214,6 +220,65 @@ def cleanLine(line: str) -> str:
     line = line.rstrip()
     line = line.strip('\t')
     return line
+
+
+def excel_bytes_from_session_rows(rows: Iterable[MentoringSessionRow]) -> bytes:
+    """Build an .xlsx workbook in memory from structured session rows."""
+    dicts = csv_ready_dicts(rows)
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+
+    header_cell = workbook.add_format({
+        'bold': True,
+        'font_size': 12,
+        'font_name': 'Arial',
+        'border': 1,
+        'bg_color': 'silver',
+    })
+    normal_cell = workbook.add_format({
+        'font_size': 12,
+        'font_name': 'Arial',
+        'border': 1,
+        'text_wrap': True,
+        'valign': 'top',
+    })
+
+    worksheet = workbook.add_worksheet('report')
+    column_widths = {
+        'date': 14,
+        'referee': 24,
+        'position': 10,
+        'mentor': 22,
+        'comments': 60,
+        'game_id': 12,
+        'center': 22,
+        'ar1': 22,
+        'ar2': 22,
+        'game_date': 14,
+        'venue': 20,
+        'time': 10,
+        'age': 8,
+        'level': 12,
+    }
+
+    for col_idx, (key, label) in enumerate(EXPORT_COLUMNS):
+        worksheet.set_column(col_idx, col_idx, column_widths.get(key, 15))
+        worksheet.write(0, col_idx, label, header_cell)
+
+    comments_col = next(i for i, (key, _) in enumerate(EXPORT_COLUMNS) if key == 'comments')
+    for row_idx, item in enumerate(dicts, start=1):
+        for col_idx, (key, _) in enumerate(EXPORT_COLUMNS):
+            value = item.get(key, '')
+            worksheet.write(row_idx, col_idx, value, normal_cell)
+        comment = item.get('comments', '') or ''
+        if comment:
+            num_lines = _comment_display_lines(comment, column_width=column_widths['comments'])
+            worksheet.set_row(row_idx, 15 * num_lines)
+
+    worksheet.freeze_panes(1, 0)
+    workbook.close()
+    return output.getvalue()
+
 
 def getExcelFromText(data: str) -> None:
 

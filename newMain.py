@@ -7,6 +7,7 @@ Converted from Streamlit version
 import logging
 from datetime import datetime as dtime
 import os
+import re
 
 # Create logger for this module
 import rmaLogging
@@ -17,9 +18,13 @@ from nicegui import ui, app
 
 from appState import AppState
 from calendar_tab import CalendarTab
-from excelWriter import getExcelFromText
+from excelWriter import excel_bytes_from_session_rows
 from mentor_game_selection import MentorGameSelection
 from auth_nicegui import render_user_sidebar
+from report_sessions import (
+    csv_bytes_from_session_rows,
+    preview_text_from_session_rows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -994,17 +999,37 @@ def _build_mentor_report_form(container):
             ui.button('Cancel', on_click=do_cancel).props('color=grey')
 
 
+def _sanitize_report_filename_part(value: str, max_len: int = 40) -> str:
+    """Make a selection value safe for use in a download filename."""
+    text = str(value).strip()
+    text = text.replace(' ', '-')
+    text = re.sub(r'[\\/:*?"<>|]+', '-', text)
+    text = re.sub(r'[^A-Za-z0-9._-]+', '-', text)
+    text = re.sub(r'-{2,}', '-', text).strip('-._')
+    if not text:
+        text = 'unknown'
+    return text[:max_len]
+
+
+def build_report_download_filename(scope: str, value: str, extension: str) -> str:
+    """Build mentor-report_{scope}_{value}_{YYYY-MM-DD}.{ext} download names."""
+    ext = extension.lstrip('.')
+    stamp = dtime.now().strftime('%Y-%m-%d')
+    safe_scope = _sanitize_report_filename_part(scope, max_len=20)
+    safe_value = _sanitize_report_filename_part(value)
+    return f'mentor-report_{safe_scope}_{safe_value}_{stamp}.{ext}'
+
+
 def render_reports_tab():
-    """Render the reports generation tab"""
+    """Render the reports generation tab: on-screen preview + CSV/Excel download."""
     org_id = current_org_id()
 
     with ui.card().classes('form-container w-full'):
         ui.label('Generate Reports').classes('text-xl font-bold mb-4')
+        ui.label(
+            'Choose a report, generate a preview, then download CSV or Excel if needed.'
+        ).classes('text-sm text-gray-400 mb-4')
 
-        # Report format
-        format_select = ui.radio(['Text', 'Excel'], value='Text').props('inline')
-
-        # Report type
         year_data = state.db.getYears(org_id)
         year_data.insert(0, ' ')
 
@@ -1014,17 +1039,18 @@ def render_reports_tab():
             value='by year'
         ).classes('w-full')
 
-        # Dynamic selection container
         selection_container = ui.column().classes('w-full')
-
-        # Download area
-        download_area = ui.column().classes('w-full mt-4')
+        action_area = ui.column().classes('w-full mt-4')
+        result_area = ui.column().classes('w-full mt-4')
 
         current_selection = {'type': None, 'value': None}
+        report_state = {'rows': None, 'scope': None, 'value': None}
 
         def update_selection():
             selection_container.clear()
-            download_area.clear()
+            action_area.clear()
+            result_area.clear()
+            report_state['rows'] = None
 
             with selection_container:
                 if report_type.value == 'by year':
@@ -1049,21 +1075,45 @@ def render_reports_tab():
         def set_selection(sel_type, value):
             current_selection['type'] = sel_type
             current_selection['value'] = value
-            update_download_button()
+            update_generate_button()
 
-        def update_download_button():
-            download_area.clear()
+        def update_generate_button():
+            action_area.clear()
+            result_area.clear()
+            report_state['rows'] = None
 
             if not current_selection['value'] or current_selection['value'] == ' ':
                 return
 
-            with download_area:
+            with action_area:
                 ui.button('Generate Report', on_click=generate_report).props('color=primary')
+
+        def show_results():
+            result_area.clear()
+            rows = report_state['rows'] or []
+            with result_area:
+                if not rows:
+                    ui.label('No mentoring sessions found for this selection.').classes(
+                        'text-gray-400'
+                    )
+                    return
+
+                ui.label(f'{len(rows)} session(s)').classes('text-sm text-gray-400 mb-2')
+                with ui.row().classes('w-full gap-2 mb-4'):
+                    ui.button('Download CSV', on_click=download_csv).props('color=primary')
+                    ui.button('Download Excel', on_click=download_excel).props('color=primary')
+
+                ui.label('Preview').classes('text-lg font-semibold mb-2')
+                preview = preview_text_from_session_rows(rows)
+                ui.textarea(value=preview).classes(
+                    'w-full font-mono text-sm'
+                ).props('readonly outlined autogrow input-class=whitespace-pre-wrap').style(
+                    'max-height: 28rem; overflow-y: auto;'
+                )
 
         def generate_report():
             sel_type = current_selection['type']
             sel_value = current_selection['value']
-            report_format = format_select.value
 
             if not sel_value or sel_value == ' ':
                 ui.notify('Please make a selection', type='warning')
@@ -1071,25 +1121,48 @@ def render_reports_tab():
 
             try:
                 if sel_type == 'year':
-                    data = state.db.produceYearReport(sel_value, org_id)
+                    rows = state.db.getYearReportRows(sel_value, org_id)
                 elif sel_type == 'week':
-                    data = state.db.produceWeekReport(sel_value, org_id)
+                    rows = state.db.getWeekReportRows(sel_value, org_id)
                 elif sel_type == 'referee':
-                    data = state.db.produceRefereeReport(sel_value, org_id)
+                    rows = state.db.getRefereeReportRows(sel_value, org_id)
                 elif sel_type == 'mentor':
-                    data = state.db.produceMentorReport(sel_value, org_id)
+                    rows = state.db.getMentorReportRows(sel_value, org_id)
                 else:
                     return
 
-                if report_format == 'Text':
-                    ui.download(data.encode(), f'report.txt')
+                report_state['rows'] = rows
+                report_state['scope'] = sel_type
+                report_state['value'] = sel_value
+                show_results()
+                if rows:
+                    ui.notify(f'Loaded {len(rows)} session(s)', type='positive')
                 else:
-                    getExcelFromText(data)
-                    with open('report.xlsx', 'rb') as f:
-                        ui.download(f.read(), 'report.xlsx')
+                    ui.notify('No sessions found for this selection', type='warning')
 
             except Exception as e:
+                logger.exception('Error generating report')
                 ui.notify(f'Error generating report: {str(e)}', type='negative')
+
+        def download_csv():
+            rows = report_state['rows']
+            if not rows:
+                ui.notify('Generate a report first', type='warning')
+                return
+            filename = build_report_download_filename(
+                report_state['scope'], report_state['value'], 'csv'
+            )
+            ui.download(csv_bytes_from_session_rows(rows), filename)
+
+        def download_excel():
+            rows = report_state['rows']
+            if not rows:
+                ui.notify('Generate a report first', type='warning')
+                return
+            filename = build_report_download_filename(
+                report_state['scope'], report_state['value'], 'xlsx'
+            )
+            ui.download(excel_bytes_from_session_rows(rows), filename)
 
         report_type.on_value_change(lambda: update_selection())
         update_selection()
