@@ -246,6 +246,7 @@ class RefereeDbCockroach(object):
                 self._addOrganizationIdColumn(table, default_org_id)
 
             self._migrateUsersNameColumns()
+            self._migrateMentorGameSelectionsFkToUsers()
 
             # Attach existing users to the default org when they have no memberships
             if self._tableExists('users') and self._tableExists('user_organizations'):
@@ -272,6 +273,96 @@ class RefereeDbCockroach(object):
                 self.connection.rollback()
             except Exception:
                 pass
+
+    def _mentorGameSelectionsFkReferencesUsers(self) -> bool:
+        """True when mentor_game_selections.mentor_id already FKs to users."""
+        if not self._tableExists('mentor_game_selections'):
+            return True
+        self.executeSql(
+            """
+            SELECT ccu.table_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+              ON ccu.constraint_name = tc.constraint_name
+             AND ccu.table_schema = tc.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+              AND tc.table_schema = 'public'
+              AND tc.table_name = 'mentor_game_selections'
+              AND kcu.column_name = 'mentor_id'
+            """
+        )
+        rows = self.cursor.fetchall()
+        if not rows:
+            return False
+        return any((row[0] or '').lower() == 'users' for row in rows)
+
+    def _migrateMentorGameSelectionsFkToUsers(self) -> None:
+        """
+        Point mentor_game_selections.mentor_id at users.id.
+
+        Older schemas FKed mentor_id to the legacy mentors table, but findMentor()
+        now returns users.id (multi-tenant mentors-as-users).
+        """
+        if not self._tableExists('mentor_game_selections') or not self._tableExists('users'):
+            return
+        if self._mentorGameSelectionsFkReferencesUsers():
+            return
+
+        logging.info("Migrating mentor_game_selections.mentor_id FK to users")
+
+        # Drop FK first — remapping to users.id cannot succeed while FK still targets mentors
+        self.executeSql(
+            """
+            SELECT tc.constraint_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+              AND tc.table_schema = 'public'
+              AND tc.table_name = 'mentor_game_selections'
+              AND kcu.column_name = 'mentor_id'
+            """
+        )
+        for (constraint_name,) in self.cursor.fetchall():
+            logging.info("Dropping FK constraint %s on mentor_game_selections", constraint_name)
+            self.executeSql(
+                f'ALTER TABLE mentor_game_selections DROP CONSTRAINT IF EXISTS "{constraint_name}"'
+            )
+
+        # Remap any legacy mentors.id values to matching users by name
+        if self._tableExists('mentors'):
+            self.executeSql(
+                """
+                UPDATE mentor_game_selections AS mgs
+                SET mentor_id = u.id
+                FROM mentors AS m
+                JOIN users AS u
+                  ON LOWER(TRIM(u.first_name)) = LOWER(TRIM(m.mentor_first_name))
+                 AND LOWER(TRIM(u.last_name)) = LOWER(TRIM(m.mentor_last_name))
+                WHERE mgs.mentor_id = m.id
+                """
+            )
+
+        # Drop rows that still don't resolve to a user (can't satisfy users FK)
+        self.executeSql(
+            """
+            DELETE FROM mentor_game_selections mgs
+            WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = mgs.mentor_id)
+            """
+        )
+
+        self.executeSql(
+            """
+            ALTER TABLE mentor_game_selections
+            ADD CONSTRAINT mentor_game_selections_mentor_id_fkey
+            FOREIGN KEY (mentor_id) REFERENCES users(id)
+            """
+        )
+        logging.info("mentor_game_selections.mentor_id now references users(id)")
 
 
     def _connectToDb(self):
