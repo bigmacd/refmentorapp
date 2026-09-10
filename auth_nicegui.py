@@ -170,6 +170,8 @@ class AuthManager:
         email: str,
         role: str = 'user',
         organization_id: Optional[int] = None,
+        first_name: str = None,
+        last_name: str = None,
     ) -> Tuple[bool, str]:
         """Create a new user account and associate with an organization."""
         if organization_id is None:
@@ -178,6 +180,11 @@ class AuthManager:
         org = self.db.getOrganizationById(organization_id)
         if not org:
             return False, "Invalid organization"
+
+        first = (first_name or '').strip().lower()
+        last = (last_name or '').strip().lower()
+        if not first or not last:
+            return False, "First name and last name are required"
 
         if self.db.userExists(username):
             return False, "Username already exists"
@@ -188,7 +195,15 @@ class AuthManager:
         password_hash, salt = self.hash_password(password)
 
         try:
-            self.db.createUser(username, password_hash, salt, email, role)
+            self.db.createUser(
+                username,
+                password_hash,
+                salt,
+                email,
+                role,
+                first_name=first,
+                last_name=last,
+            )
             user = self.db.getUserByUsername(username)
             if user:
                 self.db.addUserToOrganization(user['id'], organization_id)
@@ -811,6 +826,8 @@ def user_management_page():
                 ui.label('Create New User').classes('text-xl font-bold mb-4')
 
                 new_username = ui.input('Username').classes('w-full')
+                new_first_name = ui.input('First Name').classes('w-full')
+                new_last_name = ui.input('Last Name').classes('w-full')
                 new_email = ui.input('Email').classes('w-full')
                 new_password = ui.input('Password', password=True).classes('w-full')
                 confirm_password = ui.input('Confirm Password', password=True).classes('w-full')
@@ -832,7 +849,14 @@ def user_management_page():
                 def create_user():
                     message_area.clear()
 
-                    if not all([new_username.value, new_email.value, new_password.value, confirm_password.value]):
+                    if not all([
+                        new_username.value,
+                        new_first_name.value,
+                        new_last_name.value,
+                        new_email.value,
+                        new_password.value,
+                        confirm_password.value,
+                    ]):
                         with message_area:
                             ui.label('All fields are required').classes('text-red-500')
                         return
@@ -858,12 +882,16 @@ def user_management_page():
                         new_email.value,
                         new_role.value,
                         organization_id=new_org.value,
+                        first_name=new_first_name.value,
+                        last_name=new_last_name.value,
                     )
 
                     with message_area:
                         if success:
                             ui.label(message).classes('text-green-500')
                             new_username.value = ''
+                            new_first_name.value = ''
+                            new_last_name.value = ''
                             new_email.value = ''
                             new_password.value = ''
                             confirm_password.value = ''

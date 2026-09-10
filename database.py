@@ -1066,10 +1066,25 @@ class RefereeDbCockroach(object):
         return self.cursor.fetchone() is not None
 
 
-    def createUser(self, username: str, password_hash: str, salt: str, email: str, role: str = 'user') -> None:
+    def createUser(
+        self,
+        username: str,
+        password_hash: str,
+        salt: str,
+        email: str,
+        role: str = 'user',
+        first_name: str = None,
+        last_name: str = None,
+    ) -> None:
         """Create a new user"""
-        sql = "INSERT INTO users (username, password_hash, salt, email, role) VALUES (%s, %s, %s, %s, %s)"
-        self.executeSql(sql, (username.lower(), password_hash, salt, email.lower(), role))
+        first = (first_name or '').strip().lower()
+        last = (last_name or '').strip().lower()
+        sql = """INSERT INTO users (username, password_hash, salt, email, role, first_name, last_name)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s)"""
+        self.executeSql(
+            sql,
+            (username.lower(), password_hash, salt, email.lower(), role, first, last),
+        )
         self.connection.commit()
 
 
