@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
+from urllib.parse import urlencode
 
 from nicegui import ui, app
 from fastapi import Request
@@ -25,6 +26,36 @@ from sendemail import SendMailSimple
 schema = PasswordValidator()
 schema.min(10).max(100).has().uppercase().has().lowercase().has().digits().has().symbols().has().no().spaces()
 PASSWORD_REQUIREMENTS = "Minimum 10 characters. At least one uppercase letter, one lowercase letter, one digit, and one special character. No spaces."
+
+RESET_REQUEST_SUCCESS_MESSAGE = (
+    "If that email is in our system, you'll receive reset instructions shortly. "
+    "Check your email for a reset link."
+)
+PASSWORD_RESET_TOKEN_TTL = timedelta(minutes=15)
+
+
+def resolve_app_base_url(request: Optional[Request] = None) -> str:
+    """Public site origin for links in emails (no trailing slash).
+
+    Prefers the current request host (so custom domains / staging match what the
+    user sees), then APP_BASE_URL, then a local-dev default.
+    """
+    if request is not None:
+        proto = request.headers.get('x-forwarded-proto') or request.url.scheme
+        host = request.headers.get('x-forwarded-host') or request.headers.get('host') or request.url.netloc
+        if host:
+            return f'{proto}://{host}'.rstrip('/')
+    env_url = (os.environ.get('APP_BASE_URL') or '').strip().rstrip('/')
+    if env_url:
+        return env_url
+    port = os.environ.get('PORT', '9999')
+    return f'http://127.0.0.1:{port}'
+
+
+def build_password_reset_url(base_url: str, token: str, email: str) -> str:
+    """Build a one-time reset URL; token is only used to open the form (change is POST)."""
+    query = urlencode({'token': token, 'email': email})
+    return f'{base_url.rstrip("/")}/reset-password?{query}'
 
 
 def _format_timestamp(ts) -> str:
@@ -222,20 +253,27 @@ class AuthManager:
         """Generate a secure password reset token"""
         return secrets.token_urlsafe(32)
 
-    def request_password_reset(self, email: str) -> Tuple[bool, str]:
-        """Request a password reset for the given email"""
+    def request_password_reset(self, email: str, base_url: Optional[str] = None) -> Tuple[bool, str]:
+        """Request a password reset for the given email.
+
+        Always returns a generic success message when the address is unknown so
+        callers cannot probe which emails exist. When the user exists, emails a
+        one-time reset link (plus the raw token as a fallback).
+        """
         user = self.db.getUserByEmail(email)
 
         if not user:
-            return True, "If the email exists in our system, a password reset link will be sent."
+            return True, RESET_REQUEST_SUCCESS_MESSAGE
 
         try:
             token = self.generate_reset_token()
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=4)
+            expires_at = datetime.now(timezone.utc) + PASSWORD_RESET_TOKEN_TTL
 
             self.db.createPasswordResetToken(user['id'], token, expires_at)
 
-            # Send email
+            origin = (base_url or resolve_app_base_url()).rstrip('/')
+            reset_url = build_password_reset_url(origin, token, email)
+
             email_client = SendMailSimple()
             email_client.send(
                 email,
@@ -243,13 +281,17 @@ class AuthManager:
                 f"""<h3>This is a message from the Referee Mentor Website.</h3>
                 <table>
                     <tr><td>If you did not request a password reset, you can safely ignore this email.</td></tr>
-                    <tr><td><b>Use the following token to reset your password:</b></td></tr>
-                    <tr><td style="text-align: center; vertical-align: middle;">{token}</td></tr>
+                    <tr><td>This link expires in 15 minutes and can be used only once.</td></tr>
+                    <tr><td style="padding-top: 12px;"><a href="{reset_url}">Reset your password</a></td></tr>
+                    <tr><td style="padding-top: 12px;">If the button/link does not work, copy and paste this URL into your browser:</td></tr>
+                    <tr><td style="word-break: break-all;">{reset_url}</td></tr>
+                    <tr><td style="padding-top: 16px;">Or enter this token on the reset page:</td></tr>
+                    <tr><td style="font-family: monospace; text-align: center;">{token}</td></tr>
                 </table>
                 """
             )
 
-            return True, "Password reset requested. Check your email for the reset link."
+            return True, RESET_REQUEST_SUCCESS_MESSAGE
         except Exception as e:
             return False, f"Error requesting password reset: {str(e)}"
 
@@ -442,51 +484,95 @@ def login_page():
 
 
 @ui.page('/forgot-password')
-def forgot_password_page():
-    """Forgot password page"""
+def forgot_password_page(request: Request):
+    """Forgot password page — stay here after send; email link opens the reset form."""
     auth_manager = AuthManager()
+    base_url = resolve_app_base_url(request)
 
     with ui.card().classes('login-container'):
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold text-center w-full mb-2')
         ui.label('Reset Your Password').classes('text-gray-600 text-center w-full mb-6')
 
-        email_input = ui.input('Email Address', placeholder='Enter your email').classes('w-full')
+        form_area = ui.column().classes('w-full')
+        with form_area:
+            email_input = ui.input('Email Address', placeholder='Enter your email').classes('w-full')
+            message_area = ui.column().classes('w-full')
 
-        message_area = ui.column().classes('w-full')
+            def do_reset():
+                message_area.clear()
+                if not email_input.value:
+                    with message_area:
+                        ui.label('Please enter your email address').classes('text-red-500')
+                    return
 
-        def do_reset():
-            message_area.clear()
-            if not email_input.value:
-                with message_area:
-                    ui.label('Please enter your email address').classes('text-red-500')
-                return
-
-            success, message = auth_manager.request_password_reset(email_input.value)
-            with message_area:
+                success, message = auth_manager.request_password_reset(
+                    email_input.value.strip(),
+                    base_url=base_url,
+                )
                 if success:
-                    ui.label(message).classes('text-green-500')
-                    app.storage.user['reset_email'] = email_input.value
+                    app.storage.user['reset_email'] = email_input.value.strip()
+                    form_area.clear()
+                    with form_area:
+                        ui.label('Check your email').classes('text-xl font-semibold text-center w-full mb-2')
+                        ui.label(message).classes('text-gray-600 text-center w-full mb-4')
+                        ui.label(
+                            'Open the reset link from that email to choose a new password. '
+                            'You can close this tab.'
+                        ).classes('text-gray-500 text-center w-full mb-6 text-sm')
+                        with ui.row().classes('w-full gap-2 justify-center'):
+                            ui.button('Back to Login', on_click=lambda: ui.navigate.to('/login')).props('color=primary')
+                        ui.button(
+                            'Enter token instead',
+                            on_click=lambda: ui.navigate.to('/reset-password'),
+                        ).classes('w-full mt-4').props('flat')
                 else:
-                    ui.label(message).classes('text-red-500')
+                    with message_area:
+                        ui.label(message).classes('text-red-500')
 
-        with ui.row().classes('w-full gap-2 mt-4'):
-            ui.button('Send Reset Link', on_click=do_reset).props('color=primary')
-            ui.button('Cancel', on_click=lambda: ui.navigate.to('/login')).props('color=grey')
+            with ui.row().classes('w-full gap-2 mt-4'):
+                ui.button('Send Reset Email', on_click=do_reset).props('color=primary')
+                ui.button('Cancel', on_click=lambda: ui.navigate.to('/login')).props('color=grey')
 
-        ui.button('Have a token? Reset password', on_click=lambda: ui.navigate.to('/reset-password')).classes('w-full mt-4').props('flat')
+            ui.button(
+                'Already have a token?',
+                on_click=lambda: ui.navigate.to('/reset-password'),
+            ).classes('w-full mt-4').props('flat')
 
 
 @ui.page('/reset-password')
-def reset_password_page():
-    """Reset password page"""
+def reset_password_page(request: Request):
+    """Reset password page — token/email may come from the email deep link."""
     auth_manager = AuthManager()
+
+    query_token = (request.query_params.get('token') or '').strip()
+    query_email = (request.query_params.get('email') or '').strip()
+    stored_email = (app.storage.user.get('reset_email') or '').strip()
+    initial_email = query_email or stored_email
+
+    if query_token or query_email:
+        # Keep token out of browser history / shareable address bar after load
+        ui.run_javascript('history.replaceState(null, "", "/reset-password")')
 
     with ui.card().classes('login-container'):
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold text-center w-full mb-2')
         ui.label('Enter New Password').classes('text-gray-600 text-center w-full mb-6')
+        if query_token:
+            ui.label('Token loaded from your email link. Choose a new password below.').classes(
+                'text-gray-500 text-center w-full mb-4 text-sm'
+            )
+        else:
+            ui.label('Paste the token from your email, then choose a new password.').classes(
+                'text-gray-500 text-center w-full mb-4 text-sm'
+            )
 
-        email_input = ui.input('Email', value=app.storage.user.get('reset_email', '')).classes('w-full')
-        token_input = ui.input('Reset Token', placeholder='Enter your reset token').classes('w-full')
+        email_input = ui.input('Email', value=initial_email).classes('w-full')
+        # Hide the token when it came from the email link; still required for paste flow.
+        token_input = None
+        if not query_token:
+            token_input = ui.input(
+                'Reset Token',
+                placeholder='Paste token from email if not using the link',
+            ).classes('w-full').props('input-class=font-mono')
         password_input = ui.input('New Password', placeholder='Enter new password', password=True).classes('w-full')
         confirm_input = ui.input('Confirm Password', placeholder='Confirm new password', password=True).classes('w-full')
 
@@ -494,8 +580,9 @@ def reset_password_page():
 
         def do_reset():
             message_area.clear()
+            token = query_token if query_token else (token_input.value or '').strip()
 
-            if not all([email_input.value, token_input.value, password_input.value, confirm_input.value]):
+            if not all([email_input.value, token, password_input.value, confirm_input.value]):
                 with message_area:
                     ui.label('All fields are required').classes('text-red-500')
                 return
@@ -511,19 +598,17 @@ def reset_password_page():
                 return
 
             success, message = auth_manager.reset_password_with_token(
-                token_input.value,
+                token,
                 password_input.value,
-                email_input.value
+                email_input.value.strip(),
             )
 
             with message_area:
                 if success:
                     ui.label(message).classes('text-green-500')
                     ui.label('You can now log in with your new password.').classes('text-gray-600')
-                    # Clear reset email from storage
                     if 'reset_email' in app.storage.user:
                         del app.storage.user['reset_email']
-                    # Redirect to login after 2 seconds
                     ui.timer(2.0, lambda: ui.navigate.to('/login'), once=True)
                 else:
                     ui.label(message).classes('text-red-500')

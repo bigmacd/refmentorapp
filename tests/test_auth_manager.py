@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import unittest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta, timezone
-from auth_nicegui import AuthManager
+from auth_nicegui import AuthManager, RESET_REQUEST_SUCCESS_MESSAGE, build_password_reset_url, PASSWORD_RESET_TOKEN_TTL
 
 
 class TestAuthManagerPasswordReset(unittest.TestCase):
@@ -35,9 +35,9 @@ class TestAuthManagerPasswordReset(unittest.TestCase):
 
     @patch('auth_nicegui.SendMailSimple')
     @patch('auth_nicegui.datetime')
-    def test_password_reset_token_expiry_is_4_hours_from_utc_now(self, mock_datetime, mock_email):
+    def test_password_reset_token_expiry_is_15_minutes_from_utc_now(self, mock_datetime, mock_email):
         """
-        Test that password reset token expiry is set to exactly 4 hours
+        Test that password reset token expiry is set to exactly 15 minutes
         from the current UTC time when request_password_reset is called.
         """
         # Arrange
@@ -51,7 +51,7 @@ class TestAuthManagerPasswordReset(unittest.TestCase):
         
         # Set up a fixed UTC time for testing
         fixed_utc_time = datetime(2026, 1, 17, 19, 44, 29, tzinfo=timezone.utc)
-        expected_expiry_time = fixed_utc_time + timedelta(hours=4)
+        expected_expiry_time = fixed_utc_time + PASSWORD_RESET_TOKEN_TTL
         
         # Mock datetime.now to return our fixed time
         mock_datetime.now.return_value = fixed_utc_time
@@ -85,16 +85,16 @@ class TestAuthManagerPasswordReset(unittest.TestCase):
         self.assertIsInstance(actual_token, str)
         self.assertGreater(len(actual_token), 0)
         
-        # Verify the expiry time is exactly 4 hours from now
+        # Verify the expiry time is exactly 15 minutes from now
         self.assertEqual(actual_expiry, expected_expiry_time)
         
         # Verify it's a timezone-aware datetime in UTC
         self.assertIsNotNone(actual_expiry.tzinfo)
         self.assertEqual(actual_expiry.tzinfo, timezone.utc)
         
-        # Verify the difference is exactly 4 hours
+        # Verify the difference is exactly 15 minutes
         time_difference = actual_expiry - fixed_utc_time
-        self.assertEqual(time_difference, timedelta(hours=4))
+        self.assertEqual(time_difference, PASSWORD_RESET_TOKEN_TTL)
 
     @patch('auth_nicegui.SendMailSimple')
     def test_password_reset_token_expiry_uses_utc_timezone(self, mock_email):
@@ -170,14 +170,51 @@ class TestAuthManagerPasswordReset(unittest.TestCase):
         call_args = self.auth_manager.db.createPasswordResetToken.call_args[0]
         actual_expiry = call_args[2]
         
-        # Verify the expiry is in the future (at least 3 hours 59 minutes from now)
-        # We use a slightly smaller threshold to account for test execution time
-        min_expected_expiry = time_before_call + timedelta(hours=3, minutes=59)
-        max_expected_expiry = time_after_call + timedelta(hours=4, minutes=1)
+        # Verify the expiry is about 15 minutes from now
+        min_expected_expiry = time_before_call + timedelta(minutes=14, seconds=50)
+        max_expected_expiry = time_after_call + PASSWORD_RESET_TOKEN_TTL + timedelta(seconds=5)
         
         self.assertGreater(actual_expiry, time_before_call)
         self.assertGreater(actual_expiry, min_expected_expiry)
         self.assertLess(actual_expiry, max_expected_expiry)
+
+    @patch('auth_nicegui.SendMailSimple')
+    def test_password_reset_email_includes_deep_link(self, mock_email):
+        """Email body includes a /reset-password link with token and email."""
+        test_email = 'linkuser@example.com'
+        test_user = {'id': 42, 'username': 'linkuser', 'email': test_email, 'role': 'user'}
+        self.auth_manager.db.getUserByEmail.return_value = test_user
+        self.auth_manager.db.createPasswordResetToken = Mock()
+        mock_email_instance = Mock()
+        mock_email.return_value = mock_email_instance
+
+        base_url = 'https://example.test'
+        success, message = self.auth_manager.request_password_reset(test_email, base_url=base_url)
+
+        self.assertTrue(success)
+        self.assertEqual(message, RESET_REQUEST_SUCCESS_MESSAGE)
+        mock_email_instance.send.assert_called_once()
+        _recipient, _subject, body = mock_email_instance.send.call_args[0]
+        token = self.auth_manager.db.createPasswordResetToken.call_args[0][1]
+        expected_url = build_password_reset_url(base_url, token, test_email)
+        self.assertIn(expected_url, body)
+        self.assertIn('Reset your password', body)
+        self.assertIn(token, body)
+
+    @patch('auth_nicegui.SendMailSimple')
+    def test_password_reset_unknown_email_still_succeeds_generically(self, mock_email):
+        """Unknown emails get the same success message and no mail is sent."""
+        self.auth_manager.db.getUserByEmail.return_value = None
+        success, message = self.auth_manager.request_password_reset('missing@example.com')
+        self.assertTrue(success)
+        self.assertEqual(message, RESET_REQUEST_SUCCESS_MESSAGE)
+        mock_email.assert_not_called()
+
+    def test_build_password_reset_url_encodes_query(self):
+        url = build_password_reset_url('https://app.example', 'tok/en+1', 'a+b@example.com')
+        self.assertTrue(url.startswith('https://app.example/reset-password?'))
+        self.assertIn('token=tok%2Fen%2B1', url)
+        self.assertIn('email=a%2Bb%40example.com', url)
 
 
 if __name__ == '__main__':

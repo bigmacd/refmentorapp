@@ -17,6 +17,7 @@ primary_region = 'iad'
   DATA_CACHE_DIR = '/data/cache'
   ALLOW_LIVE_FETCH = 'false'
   SYNC_INTERVAL_HOURS = '2'
+  APP_BASE_URL = 'https://staging-refmentor-931.fly.dev'
 
 # Single process group: worker + UI on the same machine so they share /data.
 [processes]
