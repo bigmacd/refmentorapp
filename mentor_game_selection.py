@@ -375,11 +375,15 @@ class MentorGameSelection:
                 for gameId, game in ui.resultsFromRun[field].items():
                     if game['date'] == dateToMatch:
                         allDataGame = findGame(gameId, field)
+
+                        # stop-gap fix.
                         if allDataGame is not None:
-                            allDataGame['Center'] += f" {game['cmarker']} {game['crisky']}"
-                            allDataGame['AR1'] += f" {game['a1marker']} {game['a1risky']}"
-                            allDataGame['AR2'] += f" {game['a2marker']} {game['a2risky']}"
-                            newRefRecords[field].append(allDataGame)
+                            display_game = dict(allDataGame)  # shallow copy — enough for string fields
+                            display_game['Center'] = f"{allDataGame['Center']} {game['cmarker']} {game['crisky']}".strip()
+                            display_game['AR1'] = f"{allDataGame['AR1']} {game['a1marker']} {game['a1risky']}".strip()
+                            display_game['AR2'] = f"{allDataGame['AR2']} {game['a2marker']} {game['a2risky']}".strip()
+                            newRefRecords[field].append(display_game)
+
                 if field in newRefRecords and len(newRefRecords[field]) == 0:
                     del newRefRecords[field]
             return newRefRecords
