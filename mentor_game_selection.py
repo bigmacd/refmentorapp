@@ -76,7 +76,7 @@ class MentorGameSelection:
             return parts[0].lower(), parts[1].lower()
         return None, None
 
-    def _toggle_game_selection(self, mentor_name, game_date, venue, game_id, is_checked, selected_by_label, checkbox_ref=None):
+    def _toggle_game_selection(self, mentor_name, game_date, venue, game_id, is_checked, selected_by_label, checkbox_ref=None, checkbox_container=None):
         """Toggle selection of a game for a mentor"""
         firstname, lastname = self._parse_mentor_name(mentor_name)
         if not firstname or not lastname:
@@ -93,6 +93,14 @@ class MentorGameSelection:
                 ui.notify(message, type='positive')
             else:
                 ui.notify(message, type='warning')
+                if checkbox_ref is not None:
+                    if checkbox_container is not None:
+                        checkbox_container['syncing'] = True
+                    try:
+                        checkbox_ref.value = False
+                    finally:
+                        if checkbox_container is not None:
+                            checkbox_container['syncing'] = False
         else:
             # Remove selection
             success, message = self.db.removeMentorGameSelection(
@@ -184,9 +192,12 @@ class MentorGameSelection:
                                             # Create the handler that will use the checkbox reference from container
                                             def make_handler(mentor, date, ven, gid, label, container):
                                                 def handler(event):
-                                                    # event.value contains the new checkbox state
+                                                    if container.get('syncing'):
+                                                        return
                                                     checkbox_ref = container['ref']
-                                                    self._toggle_game_selection(mentor, date, ven, gid, event.value, label, checkbox_ref)
+                                                    self._toggle_game_selection(
+                                                        mentor, date, ven, gid, event.value, label, checkbox_ref, container
+                                                    )
                                                 return handler
 
                                             handler = make_handler(

@@ -77,6 +77,8 @@ class RefereeDbCockroach(object):
         ):
             self._migrateMultiTenantSchema()
 
+        self._ensureOneMentorPerGameConstraint()
+
 
     def _tableExists(self, table_name: str) -> bool:
         self.executeSql(
@@ -584,6 +586,47 @@ class RefereeDbCockroach(object):
                                                       selected_at TIMESTAMP NOT NULL DEFAULT NOW(),
                                                       UNIQUE(organization_id, mentor_id, game_date, venue, game_id))"""
         self.executeSql(sql)
+
+    def _ensureOneMentorPerGameConstraint(self) -> None:
+        """Keep one mentor per game (org + date + venue + game_id)."""
+        if not self._tableExists('mentor_game_selections'):
+            return
+        if not self._columnExists('mentor_game_selections', 'organization_id'):
+            return
+        try:
+            self.executeSql(
+                """
+                SELECT 1 FROM pg_indexes
+                WHERE tablename = 'mentor_game_selections'
+                  AND indexname = 'mentor_game_selections_one_mentor_per_game'
+                """
+            )
+            if self.cursor.fetchone():
+                return
+            self.executeSql(
+                """
+                DELETE FROM mentor_game_selections
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY organization_id, game_date, venue, game_id
+                                   ORDER BY selected_at, id
+                               ) AS rn
+                        FROM mentor_game_selections
+                    ) ranked
+                    WHERE rn > 1
+                )
+                """
+            )
+            self.executeSql(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS mentor_game_selections_one_mentor_per_game
+                ON mentor_game_selections (organization_id, game_date, venue, game_id)
+                """
+            )
+        except Exception as e:
+            logging.warning("Could not enforce one-mentor-per-game uniqueness: %s", e)
 
 
     def addVisitor(self, email: str, username: str, role: str, ip_address: str = None, user_agent: str = None) -> None:
@@ -1669,6 +1712,12 @@ class RefereeDbCockroach(object):
 
     # Mentor Game Selections methods
 
+    def _takenByOtherMentors(self, mentor_firstname: str, mentor_lastname: str, game_date: str,
+                               venue: str, game_id: str, organization_id: int) -> list:
+        this_name = f"{mentor_firstname} {mentor_lastname}".lower()
+        existing = self.getGameSelectionsByGame(game_date, venue, game_id, organization_id)
+        return [name for name in existing if name.lower() != this_name]
+
     def addMentorGameSelection(self, mentor_firstname: str, mentor_lastname: str, game_date: str,
                                venue: str, game_id: str, organization_id: int = None) -> Tuple[bool, str]:
         """Add a mentor game selection. Returns (success, message)"""
@@ -1678,6 +1727,12 @@ class RefereeDbCockroach(object):
             if not mentor:
                 return (False, f'Mentor not found: {mentor_firstname} {mentor_lastname}')
 
+            taken_by = self._takenByOtherMentors(
+                mentor_firstname, mentor_lastname, game_date, venue, game_id, org_id
+            )
+            if taken_by:
+                return (False, f'This game is already taken by {", ".join(taken_by)}')
+
             sql = """INSERT INTO mentor_game_selections (mentor_id, game_date, venue, game_id, organization_id)
                      VALUES (%s, %s, %s, %s, %s)"""
             self.executeSql(sql, (mentor[0], game_date, venue, game_id, org_id))
@@ -1685,6 +1740,12 @@ class RefereeDbCockroach(object):
             return (True, "Game selection added successfully")
         except Exception as ex:
             if 'duplicate key' in str(ex).lower() or 'unique constraint' in str(ex).lower():
+                org_id = self._resolve_organization_id(organization_id)
+                taken_by = self._takenByOtherMentors(
+                    mentor_firstname, mentor_lastname, game_date, venue, game_id, org_id
+                )
+                if taken_by:
+                    return (False, f'This game is already taken by {", ".join(taken_by)}')
                 return (False, "Game already selected by this mentor")
             return (False, f'Failed to add game selection: {ex}')
 
