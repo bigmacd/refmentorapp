@@ -212,7 +212,7 @@ class MySoccerLeague(RefereeWebSite):
 
     def getAllDatesForSeason(self) -> list:
         url = "https://mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=allDates".format(self._loginKey)
-        logger.info(f"[getAllDatesForSeason] Opening URL: {url}")
+        logger.info(f"[getAllDatesForSeason] Opening URL for all dates")
 
         try:
             start_time = time.time()
@@ -275,7 +275,7 @@ class MySoccerLeague(RefereeWebSite):
             raise
 
         url = url_template.format(self._loginKey, convertedDate)
-        logger.info(f"[getMatches] Opening URL: {url}")
+        logger.info(f"[getMatches] Opening URL for {convertedDate}")
 
         try:
             start_time = time.time()
