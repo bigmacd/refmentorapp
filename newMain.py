@@ -816,7 +816,7 @@ def _build_mentor_report_form(container):
 
         # Filter to current user if not admin
         current_user = state.auth_manager.get_current_user()
-        if current_user and not current_user.startswith('martin'):
+        if current_user:
             filtered = [v for v in mentor_values if v.lower().startswith(current_user.lower())]
             if filtered:
                 mentor_values = filtered
@@ -863,24 +863,27 @@ def _build_mentor_report_form(container):
 
         def update_venues():
             selected_date = date_select.value
+            venues = []
             if selected_date and selected_date in state.all_match_data:
-                matches = state.all_match_data[selected_date]
-                venues = sorted(list(matches.keys()))
-                venue_select.options = venues
-                venue_select.value = venues[0] if venues else None
-                update_games()
+                venues = sorted(state.all_match_data[selected_date].keys())
+            venue_select.set_options(venues, value=venues[0] if venues else None)
+            update_games()
 
         def update_games():
             selected_date = date_select.value
             selected_venue = venue_select.value
+            games = []
             if selected_date and selected_venue and selected_date in state.all_match_data:
-                matches = state.all_match_data[selected_date]
-                if selected_venue in matches:
-                    games = matches[selected_venue]
-                    game_options = [f"Time-{g['Time']}" for g in games]
-                    game_select.options = game_options
-                    game_select.value = game_options[0] if game_options else None
-                    update_refs()
+                games = state.all_match_data[selected_date].get(selected_venue, [])
+            # Dict keyed by GameID so the select value actually changes across venues
+            # (two fields can share the same kickoff time).
+            game_options = {
+                str(g.get('GameID') or f"Time-{g.get('Time', '')}"): f"Time-{g.get('Time', '')}"
+                for g in games
+            }
+            first_game = next(iter(game_options), None)
+            game_select.set_options(game_options, value=first_game)
+            update_refs()
 
         def update_refs():
             selected_date = date_select.value
@@ -888,15 +891,16 @@ def _build_mentor_report_form(container):
             selected_game = game_select.value
 
             if not all([selected_date, selected_venue, selected_game]):
+                form_state['current_match'] = None
                 return
 
             matches = state.all_match_data.get(selected_date, {})
             games = matches.get(selected_venue, [])
 
-            game_time = selected_game.split('-')[1] if selected_game else None
             current_match = None
             for g in games:
-                if g['Time'] == game_time:
+                game_key = str(g.get('GameID') or f"Time-{g.get('Time', '')}")
+                if game_key == str(selected_game):
                     current_match = g
                     break
 
