@@ -20,7 +20,7 @@ from appState import AppState
 from calendar_tab import CalendarTab
 from excelWriter import excel_bytes_from_session_rows
 from mentor_game_selection import MentorGameSelection
-from auth_nicegui import render_user_sidebar
+from auth_nicegui import render_app_header
 from report_sessions import (
     csv_bytes_from_session_rows,
     preview_text_from_session_rows,
@@ -718,12 +718,7 @@ def main_page():
     </style>
     ''')
 
-    with ui.header().classes('bg-blue-900 text-white'):
-        ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold')
-
-    render_user_sidebar(state.auth_manager)
-
-
+    render_app_header(state.auth_manager)
 
     # Tab navigation using NiceGUI tabs
     with ui.tabs().classes('w-full') as tabs:

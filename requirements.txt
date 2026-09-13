@@ -136,6 +136,8 @@ orjson==3.11.8
     # via nicegui
 password-validator==1.0
     # via -r requirements.in
+pillow==12.3.0
+    # via -r requirements.in
 propcache==0.4.1
     # via
     #   aiohttp

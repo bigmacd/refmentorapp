@@ -19,6 +19,13 @@ from password_validator import PasswordValidator
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from avatars import (
+    MAX_UPLOAD_BYTES,
+    avatar_data_url,
+    delete_avatar,
+    has_avatar,
+    save_avatar,
+)
 from database import RefereeDbCockroach
 from sendemail import SendMailSimple
 
@@ -142,6 +149,14 @@ class AuthManager:
     def get_current_user(self) -> Optional[str]:
         """Get the current authenticated username"""
         return self._storage_get('username')
+
+    def get_current_user_id(self) -> Optional[int]:
+        """Get the current authenticated user id"""
+        return self._storage_get('user_id')
+
+    def get_current_email(self) -> Optional[str]:
+        """Get the current authenticated user's email"""
+        return self._storage_get('email')
 
     def get_user_role(self) -> Optional[str]:
         """Get the current user's role"""
@@ -366,50 +381,152 @@ def require_auth(auth_manager: AuthManager):
     return True
 
 
-def render_app_header(title: str = 'Referee Mentor System') -> None:
-    """Render the standard app header."""
-    with ui.header().classes('bg-blue-900 text-white'):
-        ui.label(f'🏆 {title}').classes('text-2xl font-bold')
+_AVATAR_COLORS = ('blue-6', 'indigo-6', 'purple-6', 'teal-6', 'orange-8', 'cyan-8', 'pink-6')
 
 
-def render_user_sidebar(auth_manager: AuthManager, *, show_back_to_app: bool = False) -> None:
-    """Render the left drawer with user menu and admin links."""
-    drawer_kwargs = {'top_corner': True, 'bottom_corner': True}
-    if show_back_to_app:
-        drawer_kwargs['value'] = True
-    with ui.left_drawer(**drawer_kwargs).classes('p-4'):
-        if show_back_to_app:
-            ui.button('Back to App', on_click=lambda: ui.navigate.to('/')).classes('w-full mb-2').props('flat')
-            ui.separator().classes('my-2')
+def _user_initials(username: Optional[str]) -> str:
+    cleaned = (username or '?').replace('.', ' ').replace('_', ' ').replace('-', ' ').strip()
+    parts = [part for part in cleaned.split() if part]
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[1][0]).upper()
+    token = parts[0] if parts else '?'
+    return token[:2].upper()
 
-        current_user = auth_manager.get_current_user()
-        if current_user:
-            ui.label('Logged in as:').classes('text-gray-600 text-sm')
-            ui.label(f'{current_user}').classes('font-bold mb-2')
-            user_role = auth_manager.get_user_role()
-            if user_role:
-                ui.label(f'Role: {user_role}').classes('text-gray-600 text-sm mb-2')
-            org_name = auth_manager.get_current_organization_name()
-            if org_name:
-                ui.label(f'Organization: {org_name}').classes('text-gray-600 text-sm mb-4')
-            elif auth_manager.get_current_organization_id() is not None:
-                ui.label('Organization: (unknown)').classes('text-gray-600 text-sm mb-4')
-            else:
-                ui.label('Organization: not set').classes('text-gray-600 text-sm mb-4')
 
-        ui.separator()
+def _avatar_color(username: Optional[str]) -> str:
+    name = username or 'user'
+    return _AVATAR_COLORS[sum(ord(ch) for ch in name) % len(_AVATAR_COLORS)]
 
-        ui.button('Change Password', on_click=lambda: ui.navigate.to('/change-password')).classes('w-full mt-4').props('flat')
-        ui.button('Logout', on_click=lambda: auth_manager.logout()).classes('w-full mt-2').props('flat color=red')
 
-        if auth_manager.is_admin():
-            ui.separator().classes('my-4')
-            ui.label('Admin Functions').classes('font-bold text-sm')
-            ui.button('User Management', on_click=lambda: ui.navigate.to('/admin/users')).classes('w-full mt-2').props('flat')
-            ui.button('User Activity', on_click=lambda: ui.navigate.to('/admin/user-activity')).classes('w-full mt-2').props('flat')
-            ui.button('Organizations', on_click=lambda: ui.navigate.to('/admin/organizations')).classes('w-full mt-2').props('flat')
+def _app_version() -> str:
+    try:
+        with open('VERSION', 'r', encoding='utf-8') as version_file:
+            return version_file.read().strip()
+    except OSError:
+        return ''
 
-        ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
+
+def _organization_display(auth_manager: AuthManager) -> str:
+    org_name = auth_manager.get_current_organization_name()
+    if org_name:
+        return org_name
+    if auth_manager.get_current_organization_id() is not None:
+        return '(unknown)'
+    return 'not set'
+
+
+def _account_menu_item(label: str, icon: str, on_click, *, color: Optional[str] = None) -> None:
+    item = ui.menu_item(on_click=on_click)
+    if color:
+        item.props(f'text-color={color}')
+    with item:
+        with ui.row().classes('items-center gap-3 no-wrap w-full'):
+            ui.icon(icon, size='xs').classes('opacity-80')
+            ui.label(label)
+
+
+def render_account_avatar(
+    auth_manager: AuthManager,
+    *,
+    size: str = '40px',
+    font_size: str = '15px',
+) -> None:
+    """Render the current user's photo, or initials if none is set."""
+    username = auth_manager.get_current_user() or 'user'
+    initials = _user_initials(username)
+    color = _avatar_color(username)
+    photo = avatar_data_url(auth_manager.get_current_user_id())
+    with ui.avatar(color=color, text_color='white', size=size, font_size=font_size):
+        if photo:
+            ui.image(photo).classes('w-full h-full')
+        else:
+            ui.label(initials)
+
+
+def render_user_menu(auth_manager: AuthManager) -> None:
+    """Render a header avatar that opens account, settings, and admin actions."""
+    username = auth_manager.get_current_user() or 'user'
+    email = auth_manager.get_current_email()
+    role = auth_manager.get_user_role()
+    org = _organization_display(auth_manager)
+    version = _app_version()
+
+    with ui.button(color=None).props(
+        'flat round dense unelevated aria-label="Account menu"'
+    ).classes('app-account-btn shrink-0'):
+        render_account_avatar(auth_manager, size='40px', font_size='15px')
+        with ui.menu().props('auto-close anchor="bottom right" self="top right"').classes('app-account-menu'):
+            with ui.item().props('dense'):
+                with ui.row().classes('items-center gap-3 no-wrap py-1'):
+                    render_account_avatar(auth_manager, size='36px', font_size='14px')
+                    with ui.column().classes('gap-0 min-w-0'):
+                        ui.label(username).classes('font-semibold leading-tight')
+                        if email:
+                            ui.label(email).classes('text-xs text-gray-400 leading-tight truncate max-w-[14rem]')
+                        details = ' · '.join(part for part in (org, role) if part)
+                        if details:
+                            ui.label(details).classes('text-xs text-gray-400 leading-tight truncate max-w-[14rem]')
+            ui.separator()
+            _account_menu_item('Settings', 'settings', lambda: ui.navigate.to('/settings'))
+            if auth_manager.is_admin():
+                ui.separator()
+                ui.label('Admin').classes('text-xs uppercase tracking-wide text-gray-400 px-4 pt-2 pb-1')
+                _account_menu_item('User Management', 'group', lambda: ui.navigate.to('/admin/users'))
+                _account_menu_item('User Activity', 'history', lambda: ui.navigate.to('/admin/user-activity'))
+                _account_menu_item('Organizations', 'apartment', lambda: ui.navigate.to('/admin/organizations'))
+            ui.separator()
+            _account_menu_item('Log out', 'logout', auth_manager.logout, color='negative')
+            if version:
+                ui.label(f'Version {version}').classes(
+                    'text-xs text-gray-500 px-4 py-2 text-right'
+                )
+
+
+def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor System') -> None:
+    """Render the app header with a home link and account avatar menu."""
+    ui.add_head_html('''
+    <style>
+        .app-account-btn {
+            padding: 0 !important;
+            min-width: 40px !important;
+            min-height: 40px !important;
+        }
+        .app-account-btn .q-btn__content {
+            padding: 0 !important;
+        }
+        .app-account-btn .q-avatar img,
+        .app-account-menu .q-avatar img {
+            object-fit: cover;
+            width: 100%;
+            height: 100%;
+        }
+        .app-account-menu {
+            min-width: 16.5rem;
+            max-width: min(20rem, calc(100vw - 16px));
+        }
+        .app-header-brand,
+        .app-header-brand:hover,
+        .app-header-brand:visited {
+            color: #fff !important;
+            text-decoration: none !important;
+        }
+        .app-header-title-full { display: none; }
+        .app-header-title-short { display: inline; }
+        @media (min-width: 640px) {
+            .app-header-title-full { display: inline; }
+            .app-header-title-short { display: none; }
+        }
+    </style>
+    ''')
+    with ui.header().classes('bg-blue-900 text-white items-center px-3 gap-2 flex-nowrap'):
+        with ui.link(target='/').classes('app-header-brand min-w-0'):
+            with ui.row().classes('items-center gap-2 no-wrap'):
+                ui.label('🏆').classes('text-xl')
+                ui.label(title).classes('app-header-title-full text-xl font-bold truncate')
+                short_title = 'RefMentor' if title == 'Referee Mentor System' else title
+                ui.label(short_title).classes('app-header-title-short text-lg font-bold truncate')
+        ui.space()
+        render_user_menu(auth_manager)
 
 
 @ui.page('/login')
@@ -633,72 +750,137 @@ def reset_password_page(request: Request):
             ui.button('Cancel', on_click=lambda: ui.navigate.to('/login')).props('color=grey')
 
 
-@ui.page('/change-password')
-def change_password_page():
-    """Change password page for authenticated users"""
+def _settings_detail_row(label: str, value: str) -> None:
+    with ui.row().classes('w-full items-baseline justify-between gap-4 py-1'):
+        ui.label(label).classes('text-sm text-gray-400')
+        ui.label(value).classes('text-sm font-medium text-right')
+
+
+def _render_change_password_form(auth_manager: AuthManager) -> None:
+    current_password = ui.input('Current Password', placeholder='Enter current password', password=True).classes('w-full')
+    new_password = ui.input('New Password', placeholder='Enter new password', password=True).classes('w-full')
+    confirm_password = ui.input('Confirm Password', placeholder='Confirm new password', password=True).classes('w-full')
+    message_area = ui.column().classes('w-full')
+
+    def do_change():
+        message_area.clear()
+
+        if not all([current_password.value, new_password.value, confirm_password.value]):
+            with message_area:
+                ui.label('All fields are required').classes('text-red-500')
+            return
+
+        if not schema.validate(new_password.value):
+            with message_area:
+                ui.label(f'Password requirements: {PASSWORD_REQUIREMENTS}').classes('text-red-500')
+            return
+
+        if new_password.value != confirm_password.value:
+            with message_area:
+                ui.label('Passwords do not match').classes('text-red-500')
+            return
+
+        success, message = auth_manager.change_password(
+            auth_manager.get_current_user(),
+            current_password.value,
+            new_password.value
+        )
+
+        with message_area:
+            if success:
+                ui.notify(message + ' Please log in again with your new password.')
+                ui.timer(2.0, lambda: auth_manager.logout(), once=True)
+            else:
+                ui.label(message).classes('text-red-500')
+
+    with ui.row().classes('w-full gap-2 mt-4 flex-wrap'):
+        ui.button('Change Password', on_click=do_change).props('color=primary')
+        ui.button('Cancel', on_click=lambda: ui.navigate.to('/')).props('color=grey')
+
+
+@ui.page('/settings')
+def settings_page():
+    """Account settings for authenticated users."""
     auth_manager = AuthManager()
 
     if not auth_manager.is_authenticated():
         ui.navigate.to('/login')
         return
 
-    ui.add_head_html('''
-    <style>
-        .login-container {
-            max-width: 400px;
-            margin: 100px auto;
-            padding: 40px;
-        }
-    </style>
-    ''')
+    ui.dark_mode(True)
+    render_app_header(auth_manager)
 
-    with ui.card().classes('login-container'):
-        ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold text-center w-full mb-2')
-        ui.label('Change Password').classes('text-gray-600 text-center w-full mb-6')
+    username = auth_manager.get_current_user() or ''
+    email = auth_manager.get_current_email() or '—'
+    role = auth_manager.get_user_role() or '—'
+    org = _organization_display(auth_manager)
+    user_id = auth_manager.get_current_user_id()
 
-        current_password = ui.input('Current Password', placeholder='Enter current password', password=True).classes('w-full')
-        new_password = ui.input('New Password', placeholder='Enter new password', password=True).classes('w-full')
-        confirm_password = ui.input('Confirm Password', placeholder='Confirm new password', password=True).classes('w-full')
+    with ui.column().classes('w-full max-w-lg mx-auto p-4 gap-4'):
+        ui.label('Settings').classes('text-2xl font-bold')
 
-        message_area = ui.column().classes('w-full')
+        with ui.card().classes('w-full p-4'):
+            ui.label('Profile photo').classes('text-lg font-semibold mb-2')
+            with ui.row().classes('items-center gap-4 mb-3'):
+                render_account_avatar(auth_manager, size='72px', font_size='24px')
+                with ui.column().classes('gap-1'):
+                    ui.label('This appears in the header on every page.').classes('text-sm text-gray-400')
+                    ui.label("JPEG, PNG, or WebP. We'll crop it to a square.").classes('text-sm text-gray-400')
 
-        def do_change():
-            message_area.clear()
+            async def handle_photo_upload(event):
+                if user_id is None:
+                    ui.notify('Could not update photo for this account.', type='negative')
+                    return
+                try:
+                    data = await event.file.read()
+                    save_avatar(user_id, data)
+                except ValueError as exc:
+                    ui.notify(str(exc), type='negative')
+                    return
+                except OSError:
+                    ui.notify('Could not save that photo. Please try again.', type='negative')
+                    return
+                ui.notify('Profile photo updated.')
+                ui.navigate.reload()
 
-            if not all([current_password.value, new_password.value, confirm_password.value]):
-                with message_area:
-                    ui.label('All fields are required').classes('text-red-500')
-                return
+            ui.upload(
+                label='Upload photo',
+                auto_upload=True,
+                max_file_size=MAX_UPLOAD_BYTES,
+                on_upload=handle_photo_upload,
+                on_rejected=lambda: ui.notify(
+                    "That file is too large or isn't a supported image.",
+                    type='negative',
+                ),
+            ).props(
+                'accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"'
+            ).classes('w-full avatar-upload')
 
-            if not schema.validate(new_password.value):
-                with message_area:
-                    ui.label(f'Password requirements: {PASSWORD_REQUIREMENTS}').classes('text-red-500')
-                return
+            if has_avatar(user_id) and user_id is not None:
+                def remove_photo():
+                    delete_avatar(user_id)
+                    ui.notify('Profile photo removed.')
+                    ui.navigate.reload()
 
-            if new_password.value != confirm_password.value:
-                with message_area:
-                    ui.label('Passwords do not match').classes('text-red-500')
-                return
+                ui.button('Remove photo', on_click=remove_photo).props('flat color=negative')
 
-            success, message = auth_manager.change_password(
-                auth_manager.get_current_user(),
-                current_password.value,
-                new_password.value
-            )
+        with ui.card().classes('w-full p-4'):
+            ui.label('Profile').classes('text-lg font-semibold mb-2')
+            _settings_detail_row('Username', username)
+            _settings_detail_row('Email', email)
+            _settings_detail_row('Role', role)
+            _settings_detail_row('Organization', org)
 
-            with message_area:
-                if success:
-                    # ui.label(message).classes('text-green-500')
-                    # ui.label('Please log in again with your new password.').classes('text-gray-600')
-                    ui.notify(message + ' Please log in again with your new password.')
-                    # Log out after password change
-                    ui.timer(2.0, lambda: auth_manager.logout(), once=True)
-                else:
-                    ui.label(message).classes('text-red-500')
+        with ui.card().classes('w-full p-4'):
+            ui.label('Password').classes('text-lg font-semibold mb-1')
+            ui.label(PASSWORD_REQUIREMENTS).classes('text-sm text-gray-400 mb-4')
+            _render_change_password_form(auth_manager)
 
-        with ui.row().classes('w-full gap-2 mt-4'):
-            ui.button('Change Password', on_click=do_change).props('color=primary')
-            ui.button('Cancel', on_click=lambda: ui.navigate.to('/')).props('color=grey')
+
+@ui.page('/change-password')
+def change_password_page():
+    """Keep old bookmarks working; password changes live in Settings."""
+    ui.navigate.to('/settings')
 
 
 @ui.page('/admin/organizations')
@@ -711,8 +893,7 @@ def organizations_page():
         return
 
     ui.dark_mode(True)
-    render_app_header()
-    render_user_sidebar(auth_manager, show_back_to_app=True)
+    render_app_header(auth_manager)
 
     with ui.card().classes('w-full p-6'):
         ui.label('Organizations').classes('text-xl font-bold mb-4')
@@ -811,8 +992,7 @@ def user_management_page():
         return
 
     ui.dark_mode(True)
-    render_app_header()
-    render_user_sidebar(auth_manager, show_back_to_app=True)
+    render_app_header(auth_manager)
 
     ui.label('User Management').classes('text-xl font-bold px-4 pt-4')
 
@@ -1097,8 +1277,7 @@ def user_activity_page():
         return
 
     ui.dark_mode(True)
-    render_app_header()
-    render_user_sidebar(auth_manager, show_back_to_app=True)
+    render_app_header(auth_manager)
 
     with ui.card().classes('w-full p-6'):
         ui.label('User Activity').classes('text-xl font-bold mb-4')
