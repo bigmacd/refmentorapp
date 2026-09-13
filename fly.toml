@@ -17,7 +17,7 @@ primary_region = 'iad'
   SYNC_INTERVAL_HOURS = '2'
   showmentored = 'true'
   # Public origin used in password-reset emails (no trailing slash)
-  APP_BASE_URL = 'https://rementoring.us'
+  APP_BASE_URL = 'https://refmentoring.us'
 
 [processes]
   app = "sh -c 'python3 sync_worker.py & exec python3 newMain.py'"
