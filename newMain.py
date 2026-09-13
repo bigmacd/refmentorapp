@@ -20,7 +20,7 @@ from appState import AppState
 from calendar_tab import CalendarTab
 from excelWriter import excel_bytes_from_session_rows
 from mentor_game_selection import MentorGameSelection
-from auth_nicegui import render_app_header
+from auth_nicegui import APP_HOME, render_app_header
 from report_sessions import (
     csv_bytes_from_session_rows,
     preview_text_from_session_rows,
@@ -68,13 +68,21 @@ def current_org_id() -> int:
     return state.db.getDefaultOrganizationId()
 
 
+def landing_primary_cta() -> tuple[str, str]:
+    """Landing page primary button: sign in, or open the app if already logged in."""
+    if state.auth_manager.is_authenticated():
+        return APP_HOME, 'Open App'
+    return '/login', 'Sign In'
+
+
 def render_landing_page():
-    """Render the public landing page for unauthenticated visitors.
+    """Render the public landing page.
 
     Layout mirrors a marketing one-pager flow (sticky nav, full-bleed hero,
     alternating full-width sections, wave dividers, CTA bands) while keeping
     the existing landing content topics.
     """
+    cta_href, cta_label = landing_primary_cta()
     ui.dark_mode(False)
     ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
     ui.add_head_html('''
@@ -490,7 +498,7 @@ def render_landing_page():
     with ui.header().classes('lp-header items-center px-4 py-3').props('bordered=false'):
         with ui.row().classes('w-full items-center justify-between gap-4').style('max-width: 1160px; margin: 0 auto;'):
             ui.html(
-                '<a class="lp-brand" href="#">Referee Mentor System'
+                '<a class="lp-brand" href="/">Referee Mentor System'
                 '<small>powered by Swynga LLC</small></a>',
                 sanitize=False,
             )
@@ -499,7 +507,7 @@ def render_landing_page():
                 ui.link('Why Us', '#why-choose')
                 ui.link('How it Works', '#how-it-works')
                 ui.link('Contact', '#contact-us')
-            ui.link('Sign In', '/login').classes('lp-btn lp-btn-primary')
+            ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
 
     with ui.element('div').classes('lp-page'):
         # Hero — full-bleed media + overlay + CTA group
@@ -519,7 +527,7 @@ def render_landing_page():
                     sanitize=False,
                 )
                 with ui.element('div').classes('lp-cta-row'):
-                    ui.link('Sign In', '/login').classes('lp-btn lp-btn-primary')
+                    ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
                     ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-ghost')
 
         # About — split media / copy (like "We Can Help")
@@ -595,14 +603,14 @@ def render_landing_page():
                     '<p>Sign in to immediately access mentor reports, schedules, and workload tracking.</p>',
                     sanitize=False,
                 )
-                ui.link('Sign In', '/login').classes('lp-btn lp-btn-primary')
+                ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
 
         # Contact strip
         with ui.element('section').props('id=contact-us').classes('lp-contact'):
             with ui.element('div').classes('lp-contact-inner lp-reveal'):
                 ui.html('<h2>Questions about the Referee Mentor System?</h2>', sanitize=False)
                 with ui.row().classes('gap-3 flex-wrap'):
-                    ui.link('Sign In', '/login').classes('lp-btn lp-btn-ghost')
+                    ui.link(cta_label, cta_href).classes('lp-btn lp-btn-ghost')
                     ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-primary')
 
         with ui.element('footer').classes('lp-footer'):
@@ -628,12 +636,14 @@ def render_landing_page():
 
 
 @ui.page('/')
-def main_page():
-    # Check authentication FIRST - before ANY UI is created
-    is_auth = state.auth_manager.is_authenticated()
+def landing_page():
+    render_landing_page()
 
-    if not is_auth:
-        render_landing_page()
+
+@ui.page(APP_HOME)
+def app_page():
+    if not state.auth_manager.is_authenticated():
+        ui.navigate.to('/login')
         return
 
     ui.dark_mode(True)

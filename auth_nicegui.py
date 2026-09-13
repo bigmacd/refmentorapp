@@ -39,6 +39,7 @@ RESET_REQUEST_SUCCESS_MESSAGE = (
     "Check your email for a reset link."
 )
 PASSWORD_RESET_TOKEN_TTL = timedelta(minutes=15)
+APP_HOME = '/app'
 
 
 def resolve_app_base_url(request: Optional[Request] = None) -> str:
@@ -381,6 +382,17 @@ def require_auth(auth_manager: AuthManager):
     return True
 
 
+def require_admin(auth_manager: AuthManager) -> bool:
+    """Require an authenticated admin; otherwise send them to login or the app."""
+    if not auth_manager.is_authenticated():
+        ui.navigate.to('/login')
+        return False
+    if not auth_manager.is_admin():
+        ui.navigate.to(APP_HOME)
+        return False
+    return True
+
+
 _AVATAR_COLORS = ('blue-6', 'indigo-6', 'purple-6', 'teal-6', 'orange-8', 'cyan-8', 'pink-6')
 
 
@@ -519,7 +531,7 @@ def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor Sy
     </style>
     ''')
     with ui.header().classes('bg-blue-900 text-white items-center px-3 gap-2 flex-nowrap'):
-        with ui.link(target='/').classes('app-header-brand min-w-0'):
+        with ui.link(target=APP_HOME).classes('app-header-brand min-w-0'):
             with ui.row().classes('items-center gap-2 no-wrap'):
                 ui.label('🏆').classes('text-xl')
                 ui.label(title).classes('app-header-title-full text-xl font-bold truncate')
@@ -533,6 +545,9 @@ def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor Sy
 def login_page():
     """Login page"""
     auth_manager = AuthManager()
+    if auth_manager.is_authenticated():
+        ui.navigate.to(APP_HOME)
+        return
 
 
     # Apply dark mode via head HTML script that runs on page load
@@ -600,10 +615,8 @@ def login_page():
             if auth_manager.authenticate_user(username_input.value, password_input.value, organization_id=org_id):
                 auth_manager.log_current_user(request)
                 ip_info = request.client.host if request and request.client else 'unknown'
-                logging.info(f"User {username_input.value} logged in from IP {ip_info}, navigating to /")
-
-                # Navigate to main page (which will show its own loading spinner while data loads)
-                ui.navigate.to('/')
+                logging.info(f"User {username_input.value} logged in from IP {ip_info}, navigating to {APP_HOME}")
+                ui.navigate.to(APP_HOME)
             else:
                 logging.error(f"User {username_input.value} failed to login using organization {org_id}")
                 with message_area:
@@ -795,7 +808,7 @@ def _render_change_password_form(auth_manager: AuthManager) -> None:
 
     with ui.row().classes('w-full gap-2 mt-4 flex-wrap'):
         ui.button('Change Password', on_click=do_change).props('color=primary')
-        ui.button('Cancel', on_click=lambda: ui.navigate.to('/')).props('color=grey')
+        ui.button('Cancel', on_click=lambda: ui.navigate.to(APP_HOME)).props('color=grey')
 
 
 @ui.page('/settings')
@@ -888,8 +901,7 @@ def organizations_page():
     """Organization management (admin only)."""
     auth_manager = AuthManager()
 
-    if not auth_manager.is_authenticated() or not auth_manager.is_admin():
-        ui.navigate.to('/')
+    if not require_admin(auth_manager):
         return
 
     ui.dark_mode(True)
@@ -987,8 +999,7 @@ def user_management_page():
     """User management page for admins"""
     auth_manager = AuthManager()
 
-    if not auth_manager.is_authenticated() or not auth_manager.is_admin():
-        ui.navigate.to('/')
+    if not require_admin(auth_manager):
         return
 
     ui.dark_mode(True)
@@ -1272,8 +1283,7 @@ def user_activity_page():
     """Recent login activity for users in a selected organization (admin only)."""
     auth_manager = AuthManager()
 
-    if not auth_manager.is_authenticated() or not auth_manager.is_admin():
-        ui.navigate.to('/')
+    if not require_admin(auth_manager):
         return
 
     ui.dark_mode(True)
