@@ -20,7 +20,7 @@ from appState import AppState
 from calendar_tab import CalendarTab
 from excelWriter import excel_bytes_from_session_rows
 from mentor_game_selection import MentorGameSelection
-from auth_nicegui import APP_HOME, render_app_header
+from auth_nicegui import APP_HOME, HELP_PATH, render_app_header
 from report_sessions import (
     csv_bytes_from_session_rows,
     preview_text_from_session_rows,
@@ -35,6 +35,12 @@ state = AppState(logger, ui)
 _static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 if os.path.isdir(_static_dir):
     app.add_static_files('/static', _static_dir)
+
+_guide_images_dir = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'docs', 'user-guide', 'images'
+)
+if os.path.isdir(_guide_images_dir):
+    app.add_static_files('/guide-images', _guide_images_dir)
 
 # @app.get('/_nicegui_ws/health')
 # def handle_websocket_health():
@@ -456,6 +462,16 @@ def render_landing_page():
             padding: 1.5rem 1rem 2rem;
             font-size: 0.9rem;
         }
+        .lp-footer a {
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-block;
+            margin-bottom: 0.5rem;
+        }
+        .lp-footer a:hover {
+            color: #ffffff;
+        }
         .lp-reveal {
             opacity: 0;
             transform: translateY(28px);
@@ -506,6 +522,7 @@ def render_landing_page():
                 ui.link('About', '#about-us')
                 ui.link('Why Us', '#why-choose')
                 ui.link('How it Works', '#how-it-works')
+                ui.link('Help', HELP_PATH)
                 ui.link('Contact', '#contact-us')
             ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
 
@@ -614,6 +631,7 @@ def render_landing_page():
                     ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-primary')
 
         with ui.element('footer').classes('lp-footer'):
+            ui.link('Help', HELP_PATH)
             ui.label(f'© {dtime.now().year} Swynga LLC. All rights reserved.')
 
     ui.add_body_html('''

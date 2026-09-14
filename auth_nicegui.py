@@ -40,6 +40,10 @@ RESET_REQUEST_SUCCESS_MESSAGE = (
 )
 PASSWORD_RESET_TOKEN_TTL = timedelta(minutes=15)
 APP_HOME = '/app'
+HELP_PATH = '/help'
+_USER_GUIDE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'docs', 'user-guide.md')
+_USER_GUIDE_IMAGE_PREFIX = '](user-guide/images/'
+_USER_GUIDE_IMAGE_URL = '](/guide-images/'
 
 
 def resolve_app_base_url(request: Optional[Request] = None) -> str:
@@ -418,6 +422,19 @@ def _app_version() -> str:
         return ''
 
 
+def _load_help_markdown() -> str:
+    try:
+        with open(_USER_GUIDE_PATH, 'r', encoding='utf-8') as guide_file:
+            content = guide_file.read()
+    except OSError:
+        return 'The user guide is not available in this deployment.'
+    return content.replace(_USER_GUIDE_IMAGE_PREFIX, _USER_GUIDE_IMAGE_URL)
+
+
+def _auth_screen_help_link() -> None:
+    ui.link('Help', HELP_PATH).classes('w-full text-center text-gray-500 mt-4 no-underline')
+
+
 def _organization_display(auth_manager: AuthManager) -> str:
     org_name = auth_manager.get_current_organization_name()
     if org_name:
@@ -453,6 +470,20 @@ def render_account_avatar(
             ui.image(photo).classes('w-full h-full')
         else:
             ui.label(initials)
+
+
+def render_help_menu() -> None:
+    """Header help control. Ask-a-question can be added to this menu later."""
+    with ui.button(color=None).props(
+        'flat round dense unelevated aria-label="Help"'
+    ).classes('app-help-btn shrink-0 text-white'):
+        ui.icon('help_outline')
+        with ui.menu().props('auto-close anchor="bottom right" self="top right"').classes('app-help-menu'):
+            _account_menu_item(
+                'View Documentation',
+                'menu_book',
+                lambda: ui.navigate.to(HELP_PATH),
+            )
 
 
 def render_user_menu(auth_manager: AuthManager) -> None:
@@ -516,6 +547,23 @@ def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor Sy
             min-width: 16.5rem;
             max-width: min(20rem, calc(100vw - 16px));
         }
+        .app-help-btn {
+            color: #fff !important;
+            min-width: 40px !important;
+            min-height: 40px !important;
+        }
+        .app-help-btn:hover {
+            background: rgba(255, 255, 255, 0.12) !important;
+        }
+        .app-help-menu {
+            min-width: 13rem;
+        }
+        .app-header-divider {
+            width: 1px;
+            align-self: stretch;
+            margin: 6px 2px;
+            background: rgba(255, 255, 255, 0.25);
+        }
         .app-header-brand,
         .app-header-brand:hover,
         .app-header-brand:visited {
@@ -530,15 +578,70 @@ def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor Sy
         }
     </style>
     ''')
+    home_target = APP_HOME if auth_manager.is_authenticated() else '/'
     with ui.header().classes('bg-blue-900 text-white items-center px-3 gap-2 flex-nowrap'):
-        with ui.link(target=APP_HOME).classes('app-header-brand min-w-0'):
+        with ui.link(target=home_target).classes('app-header-brand min-w-0'):
             with ui.row().classes('items-center gap-2 no-wrap'):
                 ui.label('🏆').classes('text-xl')
                 ui.label(title).classes('app-header-title-full text-xl font-bold truncate')
                 short_title = 'RefMentor' if title == 'Referee Mentor System' else title
                 ui.label(short_title).classes('app-header-title-short text-lg font-bold truncate')
         ui.space()
-        render_user_menu(auth_manager)
+        render_help_menu()
+        ui.element('div').classes('app-header-divider')
+        if auth_manager.is_authenticated():
+            render_user_menu(auth_manager)
+        else:
+            ui.link('Sign In', '/login').classes(
+                'text-white font-semibold no-underline px-2 py-1 shrink-0'
+            )
+
+
+@ui.page(HELP_PATH)
+def help_page():
+    """Public user guide."""
+    auth_manager = AuthManager()
+    ui.dark_mode(False)
+    ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
+    ui.add_head_html('''
+    <style>
+        .help-doc {
+            max-width: 52rem;
+            margin: 0 auto;
+            padding: 1.5rem 1rem 3.5rem;
+            line-height: 1.6;
+        }
+        .help-doc img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 0.5rem;
+            box-shadow: 0 8px 24px rgba(11, 31, 77, 0.16);
+            margin: 0.75rem 0 1.25rem;
+        }
+        .help-doc table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0 1.5rem;
+            font-size: 0.95rem;
+        }
+        .help-doc th,
+        .help-doc td {
+            border: 1px solid rgba(18, 32, 58, 0.16);
+            padding: 0.45rem 0.7rem;
+            text-align: left;
+            vertical-align: top;
+        }
+        .help-doc th {
+            background: rgba(11, 31, 77, 0.06);
+        }
+        .help-doc pre {
+            overflow-x: auto;
+        }
+    </style>
+    ''')
+    render_app_header(auth_manager)
+    with ui.element('div').classes('help-doc'):
+        ui.markdown(_load_help_markdown())
 
 
 @ui.page('/login')
@@ -625,6 +728,7 @@ def login_page():
         ui.button('Login', on_click=do_login).classes('w-full mt-4').props('color=primary')
         ui.button('Forgot Password?', on_click=lambda: ui.navigate.to('/forgot-password')).classes('w-full mt-2').props('flat')
         ui.button('Back to Home', on_click=lambda: ui.navigate.to('/')).classes('w-full mt-2').props('flat')
+        _auth_screen_help_link()
         ui.label('Version: ' + open('VERSION', 'r').read().strip()).classes('text-gray-600 text-right w-full mb-6')
 
 
@@ -682,6 +786,7 @@ def forgot_password_page(request: Request):
                 'Already have a token?',
                 on_click=lambda: ui.navigate.to('/reset-password'),
             ).classes('w-full mt-4').props('flat')
+        _auth_screen_help_link()
 
 
 @ui.page('/reset-password')
@@ -761,6 +866,7 @@ def reset_password_page(request: Request):
         with ui.row().classes('w-full gap-2 mt-4'):
             ui.button('Reset Password', on_click=do_reset).props('color=primary')
             ui.button('Cancel', on_click=lambda: ui.navigate.to('/login')).props('color=grey')
+        _auth_screen_help_link()
 
 
 def _settings_detail_row(label: str, value: str) -> None:
