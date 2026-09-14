@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import json
 import os
 import logging
 import re
@@ -7,6 +8,18 @@ from typing import Tuple, Optional, Any, List
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from report_sessions import MentoringSessionRow, rows_from_db_tuples, text_from_session_rows
+
+
+def _parse_user_settings(value: Any) -> dict:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 class RefereeDbCockroach(object):
@@ -77,6 +90,13 @@ class RefereeDbCockroach(object):
         ):
             self._migrateMultiTenantSchema()
 
+        self._migrateUsersSettingsColumn()
+        self._migrateUsersAvatarColumn()
+        try:
+            from avatars import import_legacy_file_avatars
+            import_legacy_file_avatars(self)
+        except Exception:
+            logging.exception('Could not import legacy avatar files')
         self._ensureOneMentorPerGameConstraint()
 
 
@@ -233,6 +253,24 @@ class RefereeDbCockroach(object):
         if added:
             logging.info("Migrated users name columns")
 
+    def _migrateUsersSettingsColumn(self) -> None:
+        """Ensure users.settings exists for account-scoped preferences."""
+        if not self._tableExists('users'):
+            return
+        if self._columnExists('users', 'settings'):
+            return
+        self.executeSql("ALTER TABLE users ADD COLUMN settings JSONB NOT NULL DEFAULT '{}'::jsonb")
+        logging.info("Added users.settings")
+
+    def _migrateUsersAvatarColumn(self) -> None:
+        """Ensure users.avatar_jpeg exists for account-scoped profile photos."""
+        if not self._tableExists('users'):
+            return
+        if self._columnExists('users', 'avatar_jpeg'):
+            return
+        self.executeSql("ALTER TABLE users ADD COLUMN avatar_jpeg BYTEA")
+        logging.info("Added users.avatar_jpeg")
+
     def _migrateMultiTenantSchema(self) -> None:
         """
         Bring a restored / pre-multi-tenant database up to the org-scoped schema.
@@ -248,6 +286,7 @@ class RefereeDbCockroach(object):
                 self._addOrganizationIdColumn(table, default_org_id)
 
             self._migrateUsersNameColumns()
+            self._migrateUsersSettingsColumn()
             self._migrateMentorGameSelectionsFkToUsers()
 
             # Attach existing users to the default org when they have no memberships
@@ -529,6 +568,8 @@ class RefereeDbCockroach(object):
                                      role TEXT NOT NULL DEFAULT 'user',
                                      first_name TEXT,
                                      last_name TEXT,
+                                     settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+                                     avatar_jpeg BYTEA,
                                      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                                      last_login TIMESTAMP)"""
         self.executeSql(sql)
@@ -1224,7 +1265,10 @@ class RefereeDbCockroach(object):
 
     def getUserByUsername(self, username: str) -> dict:
         """Get user by username"""
-        sql = "SELECT id, username, password_hash, salt, email, role, created_at, last_login FROM users WHERE username = %s"
+        sql = (
+            "SELECT id, username, password_hash, salt, email, role, created_at, last_login, settings "
+            "FROM users WHERE username = %s"
+        )
         self.executeSql(sql, (username.lower(),))
         row = self.cursor.fetchone()
         if row:
@@ -1236,7 +1280,8 @@ class RefereeDbCockroach(object):
                 'email': row[4],
                 'role': row[5],
                 'created_at': row[6],
-                'last_login': row[7]
+                'last_login': row[7],
+                'settings': _parse_user_settings(row[8] if len(row) > 8 else None),
             }
         return None
 
@@ -1491,6 +1536,49 @@ class RefereeDbCockroach(object):
             'created_at': row[4],
             'last_login': row[5],
         }
+
+    def getUserSettings(self, user_id: int) -> dict:
+        sql = "SELECT settings FROM users WHERE id = %s"
+        self.executeSql(sql, (user_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            return {}
+        return _parse_user_settings(row[0])
+
+    def userHasAvatar(self, user_id: int) -> bool:
+        sql = "SELECT avatar_jpeg IS NOT NULL FROM users WHERE id = %s"
+        self.executeSql(sql, (user_id,))
+        row = self.cursor.fetchone()
+        return bool(row and row[0])
+
+    def getUserAvatar(self, user_id: int) -> Optional[bytes]:
+        sql = "SELECT avatar_jpeg FROM users WHERE id = %s"
+        self.executeSql(sql, (user_id,))
+        row = self.cursor.fetchone()
+        if not row or row[0] is None:
+            return None
+        return bytes(row[0])
+
+    def setUserAvatar(self, user_id: int, jpeg_bytes: bytes) -> None:
+        sql = "UPDATE users SET avatar_jpeg = %s WHERE id = %s"
+        self.executeSql(sql, (jpeg_bytes, user_id))
+        self.connection.commit()
+
+    def deleteUserAvatar(self, user_id: int) -> None:
+        sql = "UPDATE users SET avatar_jpeg = NULL WHERE id = %s"
+        self.executeSql(sql, (user_id,))
+        self.connection.commit()
+
+    def updateUserSetting(self, user_id: int, key: str, value: Any) -> None:
+        """Merge one key into users.settings (JSONB)."""
+        patch = json.dumps({key: value})
+        sql = """
+            UPDATE users
+            SET settings = COALESCE(settings, '{}'::jsonb) || %s::jsonb
+            WHERE id = %s
+        """
+        self.executeSql(sql, (patch, user_id))
+        self.connection.commit()
 
     def updateUserPassword(self, username: str, password_hash: str, salt: str) -> None:
         """Update user password"""

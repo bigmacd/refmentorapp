@@ -131,7 +131,7 @@ class AuthManager:
         else:
             app.storage.user['organization_name'] = None
 
-        _carry_dark_mode_preference_into_session()
+        _load_user_settings_into_session(user, self.db)
         self.db.updateLastLogin(username)
         return True
 
@@ -425,16 +425,42 @@ def _app_version() -> str:
         return ''
 
 
+def _as_bool(value, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    if value is None:
+        return default
+    return bool(value)
+
+
 def get_dark_mode_preference() -> bool:
-    """Saved appearance: session first, then this browser, else dark."""
+    """Saved appearance: session, then account, then this browser, else dark."""
     try:
         if DARK_MODE_STORAGE_KEY in app.storage.user:
-            return bool(app.storage.user[DARK_MODE_STORAGE_KEY])
+            return _as_bool(app.storage.user[DARK_MODE_STORAGE_KEY], DEFAULT_DARK_MODE)
     except RuntimeError:
         pass
     try:
+        user_id = app.storage.user.get('user_id')
+    except RuntimeError:
+        user_id = None
+    if user_id is not None:
+        try:
+            settings = RefereeDbCockroach().getUserSettings(user_id)
+            if 'dark_mode' in settings:
+                enabled = _as_bool(settings['dark_mode'], DEFAULT_DARK_MODE)
+                try:
+                    app.storage.user[DARK_MODE_STORAGE_KEY] = enabled
+                except RuntimeError:
+                    pass
+                return enabled
+        except Exception:
+            logging.exception('Could not load dark mode from database')
+    try:
         if DARK_MODE_STORAGE_KEY in app.storage.browser:
-            return bool(app.storage.browser[DARK_MODE_STORAGE_KEY])
+            return _as_bool(app.storage.browser[DARK_MODE_STORAGE_KEY], DEFAULT_DARK_MODE)
     except RuntimeError:
         pass
     return DEFAULT_DARK_MODE
@@ -443,37 +469,54 @@ def get_dark_mode_preference() -> bool:
 def persist_dark_mode_preference(enabled: bool) -> None:
     enabled = bool(enabled)
     try:
+        user_id = app.storage.user.get('user_id')
+    except Exception:
+        user_id = None
+    if user_id is not None:
+        try:
+            RefereeDbCockroach().updateUserSetting(user_id, 'dark_mode', enabled)
+        except Exception:
+            logging.exception('Could not save dark mode to database')
+    else:
+        logging.warning('Could not save dark mode: no user_id in session')
+    try:
         app.storage.user[DARK_MODE_STORAGE_KEY] = enabled
-    except RuntimeError:
+    except Exception:
         logging.debug('Could not persist dark mode to user storage')
     try:
         app.storage.browser[DARK_MODE_STORAGE_KEY] = enabled
-    except RuntimeError:
+    except Exception:
         logging.debug('Could not persist dark mode to browser storage')
 
 
-def _carry_dark_mode_preference_into_session() -> None:
-    """Keep the browser theme after login (user storage is empty on a new session)."""
-    if DARK_MODE_STORAGE_KEY in app.storage.user:
+def _load_user_settings_into_session(user: dict, db: RefereeDbCockroach) -> None:
+    """Put account settings into the session; import a legacy browser pref if needed."""
+    settings = user.get('settings') or {}
+    if 'dark_mode' in settings:
+        app.storage.user[DARK_MODE_STORAGE_KEY] = _as_bool(
+            settings['dark_mode'], DEFAULT_DARK_MODE
+        )
         return
     try:
         if DARK_MODE_STORAGE_KEY in app.storage.browser:
-            app.storage.user[DARK_MODE_STORAGE_KEY] = bool(
-                app.storage.browser[DARK_MODE_STORAGE_KEY]
+            enabled = _as_bool(
+                app.storage.browser[DARK_MODE_STORAGE_KEY], DEFAULT_DARK_MODE
             )
+            app.storage.user[DARK_MODE_STORAGE_KEY] = enabled
+            user_id = user.get('id')
+            if user_id is not None:
+                db.updateUserSetting(user_id, 'dark_mode', enabled)
+            return
     except RuntimeError:
         logging.debug('Could not read dark mode from browser storage at login')
+    app.storage.user[DARK_MODE_STORAGE_KEY] = DEFAULT_DARK_MODE
 
 
 def apply_app_dark_mode(*, authenticated: bool = True):
     """One DarkMode element per page. Authenticated pages follow the saved toggle."""
     if not authenticated:
         return ui.dark_mode(False)
-
-    def _on_change(e) -> None:
-        persist_dark_mode_preference(bool(e.value))
-
-    return ui.dark_mode(get_dark_mode_preference(), on_change=_on_change)
+    return ui.dark_mode(get_dark_mode_preference())
 
 
 def _load_help_markdown() -> str:
@@ -513,12 +556,14 @@ def render_account_avatar(
     *,
     size: str = '40px',
     font_size: str = '15px',
+    photo: Optional[str] = None,
 ) -> None:
     """Render the current user's photo, or initials if none is set."""
     username = auth_manager.get_current_user() or 'user'
     initials = _user_initials(username)
     color = _avatar_color(username)
-    photo = avatar_data_url(auth_manager.get_current_user_id())
+    if photo is None:
+        photo = avatar_data_url(auth_manager.get_current_user_id(), auth_manager.db)
     with ui.avatar(color=color, text_color='white', size=size, font_size=font_size):
         if photo:
             ui.image(photo).classes('w-full h-full')
@@ -547,15 +592,16 @@ def render_user_menu(auth_manager: AuthManager) -> None:
     role = auth_manager.get_user_role()
     org = _organization_display(auth_manager)
     version = _app_version()
+    photo = avatar_data_url(auth_manager.get_current_user_id(), auth_manager.db)
 
     with ui.button(color=None).props(
         'flat round dense unelevated aria-label="Account menu"'
     ).classes('app-account-btn shrink-0'):
-        render_account_avatar(auth_manager, size='40px', font_size='15px')
+        render_account_avatar(auth_manager, size='40px', font_size='15px', photo=photo)
         with ui.menu().props('auto-close anchor="bottom right" self="top right"').classes('app-account-menu'):
             with ui.item().props('dense'):
                 with ui.row().classes('items-center gap-3 no-wrap py-1'):
-                    render_account_avatar(auth_manager, size='36px', font_size='14px')
+                    render_account_avatar(auth_manager, size='36px', font_size='14px', photo=photo)
                     with ui.column().classes('gap-0 min-w-0'):
                         ui.label(username).classes('font-semibold leading-tight')
                         if email:
@@ -1006,11 +1052,11 @@ def settings_page():
                     return
                 try:
                     data = await event.file.read()
-                    save_avatar(user_id, data)
+                    save_avatar(user_id, data, auth_manager.db)
                 except ValueError as exc:
                     ui.notify(str(exc), type='negative')
                     return
-                except OSError:
+                except Exception:
                     ui.notify('Could not save that photo. Please try again.', type='negative')
                     return
                 ui.notify('Profile photo updated.')
@@ -1029,9 +1075,9 @@ def settings_page():
                 'accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"'
             ).classes('w-full avatar-upload')
 
-            if has_avatar(user_id) and user_id is not None:
+            if has_avatar(user_id, auth_manager.db) and user_id is not None:
                 def remove_photo():
-                    delete_avatar(user_id)
+                    delete_avatar(user_id, auth_manager.db)
                     ui.notify('Profile photo removed.')
                     ui.navigate.reload()
 
@@ -1046,8 +1092,10 @@ def settings_page():
 
         with ui.card().classes('w-full p-4'):
             ui.label('Appearance').classes('text-lg font-semibold mb-2')
-            ui.switch('Dark mode', value=bool(dark.value)).bind_value(dark)
-            ui.label('Applies to the app, Settings, Help, and admin pages on this device.').classes(
+            ui.switch('Dark mode', value=bool(dark.value)).bind_value(dark).on_value_change(
+                lambda e: persist_dark_mode_preference(bool(e.value))
+            )
+            ui.label('Saved to your account and used on every device you log in from.').classes(
                 'text-sm text-gray-400 mt-1'
             )
 

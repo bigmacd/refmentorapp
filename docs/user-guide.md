@@ -146,7 +146,7 @@ Open your avatar, then **Settings**.
 
 ### Appearance
 
-Turn **Dark mode** on or off. The choice is saved on this device and used the next time you open the app.
+Turn **Dark mode** on or off. The choice is saved on your account and used on every device you log in from.
 
 ### Password
 
