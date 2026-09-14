@@ -144,6 +144,10 @@ Open your avatar, then **Settings**.
 
 **Username**, **Email**, **Role**, and **Organization** are shown here. They are not editable on this page — ask an admin if something is wrong.
 
+### Appearance
+
+Turn **Dark mode** on or off. The choice is saved on this device and used the next time you open the app.
+
 ### Password
 
 Enter **Current Password**, **New Password**, and **Confirm Password**, then **Change Password**. After a successful change you are signed out and must log in again with the new password. **Cancel** returns to the app.

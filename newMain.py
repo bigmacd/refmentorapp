@@ -664,9 +664,8 @@ def app_page():
         ui.navigate.to('/login')
         return
 
-    ui.dark_mode(True)
+    render_app_header(state.auth_manager)
 
-    # Only proceed if authenticated - show loading state first
     org_id = current_org_id()
 
     # Create a loading overlay that will be shown while data loads
@@ -745,8 +744,6 @@ def app_page():
         }
     </style>
     ''')
-
-    render_app_header(state.auth_manager)
 
     # Tab navigation using NiceGUI tabs
     with ui.tabs().classes('w-full') as tabs:
@@ -1205,7 +1202,7 @@ def render_workload_tab():
         ui.label(f'Organization: {org_name}').classes('text-sm text-gray-400 mb-4')
 
         output_area = ui.label('Loading workload data...').classes(
-            'w-full whitespace-pre-wrap font-mono text-sm p-4 rounded bg-gray-900'
+            'w-full whitespace-pre-wrap font-mono text-sm p-4 rounded bg-gray-900 text-gray-100'
         )
 
         def check_workload_status():
@@ -1266,7 +1263,7 @@ if __name__ in {"__main__", "__mp_main__"}:
         host=host,
         reload=False,
         show=False,
-        dark=True,  # Force dark mode exclusively
+        dark=True,  # default; authenticated pages override from the Settings toggle
         favicon=None,  # Explicitly disable favicon to avoid potential WebSocket issues
         storage_secret=os.environ.get('STORAGE_SECRET', 'referee-mentor-secret-key-change-in-production')
     )

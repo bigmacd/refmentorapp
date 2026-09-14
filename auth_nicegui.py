@@ -41,6 +41,8 @@ RESET_REQUEST_SUCCESS_MESSAGE = (
 PASSWORD_RESET_TOKEN_TTL = timedelta(minutes=15)
 APP_HOME = '/app'
 HELP_PATH = '/help'
+DARK_MODE_STORAGE_KEY = 'dark_mode'
+DEFAULT_DARK_MODE = True
 _USER_GUIDE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'docs', 'user-guide.md')
 _USER_GUIDE_IMAGE_PREFIX = '](user-guide/images/'
 _USER_GUIDE_IMAGE_URL = '](/guide-images/'
@@ -129,6 +131,7 @@ class AuthManager:
         else:
             app.storage.user['organization_name'] = None
 
+        _carry_dark_mode_preference_into_session()
         self.db.updateLastLogin(username)
         return True
 
@@ -422,6 +425,57 @@ def _app_version() -> str:
         return ''
 
 
+def get_dark_mode_preference() -> bool:
+    """Saved appearance: session first, then this browser, else dark."""
+    try:
+        if DARK_MODE_STORAGE_KEY in app.storage.user:
+            return bool(app.storage.user[DARK_MODE_STORAGE_KEY])
+    except RuntimeError:
+        pass
+    try:
+        if DARK_MODE_STORAGE_KEY in app.storage.browser:
+            return bool(app.storage.browser[DARK_MODE_STORAGE_KEY])
+    except RuntimeError:
+        pass
+    return DEFAULT_DARK_MODE
+
+
+def persist_dark_mode_preference(enabled: bool) -> None:
+    enabled = bool(enabled)
+    try:
+        app.storage.user[DARK_MODE_STORAGE_KEY] = enabled
+    except RuntimeError:
+        logging.debug('Could not persist dark mode to user storage')
+    try:
+        app.storage.browser[DARK_MODE_STORAGE_KEY] = enabled
+    except RuntimeError:
+        logging.debug('Could not persist dark mode to browser storage')
+
+
+def _carry_dark_mode_preference_into_session() -> None:
+    """Keep the browser theme after login (user storage is empty on a new session)."""
+    if DARK_MODE_STORAGE_KEY in app.storage.user:
+        return
+    try:
+        if DARK_MODE_STORAGE_KEY in app.storage.browser:
+            app.storage.user[DARK_MODE_STORAGE_KEY] = bool(
+                app.storage.browser[DARK_MODE_STORAGE_KEY]
+            )
+    except RuntimeError:
+        logging.debug('Could not read dark mode from browser storage at login')
+
+
+def apply_app_dark_mode(*, authenticated: bool = True):
+    """One DarkMode element per page. Authenticated pages follow the saved toggle."""
+    if not authenticated:
+        return ui.dark_mode(False)
+
+    def _on_change(e) -> None:
+        persist_dark_mode_preference(bool(e.value))
+
+    return ui.dark_mode(get_dark_mode_preference(), on_change=_on_change)
+
+
 def _load_help_markdown() -> str:
     try:
         with open(_USER_GUIDE_PATH, 'r', encoding='utf-8') as guide_file:
@@ -525,8 +579,9 @@ def render_user_menu(auth_manager: AuthManager) -> None:
                 )
 
 
-def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor System') -> None:
+def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor System'):
     """Render the app header with a home link and account avatar menu."""
+    dark = apply_app_dark_mode(authenticated=auth_manager.is_authenticated())
     ui.add_head_html('''
     <style>
         .app-account-btn {
@@ -595,13 +650,13 @@ def render_app_header(auth_manager: AuthManager, title: str = 'Referee Mentor Sy
             ui.link('Sign In', '/login').classes(
                 'text-white font-semibold no-underline px-2 py-1 shrink-0'
             )
+    return dark
 
 
 @ui.page(HELP_PATH)
 def help_page():
     """Public user guide."""
     auth_manager = AuthManager()
-    ui.dark_mode(False)
     ui.add_head_html('<link rel="manifest" href="/static/manifest.json">')
     ui.add_head_html('''
     <style>
@@ -626,13 +681,13 @@ def help_page():
         }
         .help-doc th,
         .help-doc td {
-            border: 1px solid rgba(18, 32, 58, 0.16);
+            border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
             padding: 0.45rem 0.7rem;
             text-align: left;
             vertical-align: top;
         }
         .help-doc th {
-            background: rgba(11, 31, 77, 0.06);
+            background: color-mix(in srgb, currentColor 8%, transparent);
         }
         .help-doc pre {
             overflow-x: auto;
@@ -926,8 +981,7 @@ def settings_page():
         ui.navigate.to('/login')
         return
 
-    ui.dark_mode(True)
-    render_app_header(auth_manager)
+    dark = render_app_header(auth_manager)
 
     username = auth_manager.get_current_user() or ''
     email = auth_manager.get_current_email() or '—'
@@ -991,6 +1045,13 @@ def settings_page():
             _settings_detail_row('Organization', org)
 
         with ui.card().classes('w-full p-4'):
+            ui.label('Appearance').classes('text-lg font-semibold mb-2')
+            ui.switch('Dark mode', value=bool(dark.value)).bind_value(dark)
+            ui.label('Applies to the app, Settings, Help, and admin pages on this device.').classes(
+                'text-sm text-gray-400 mt-1'
+            )
+
+        with ui.card().classes('w-full p-4'):
             ui.label('Password').classes('text-lg font-semibold mb-1')
             ui.label(PASSWORD_REQUIREMENTS).classes('text-sm text-gray-400 mb-4')
             _render_change_password_form(auth_manager)
@@ -1010,7 +1071,6 @@ def organizations_page():
     if not require_admin(auth_manager):
         return
 
-    ui.dark_mode(True)
     render_app_header(auth_manager)
 
     with ui.card().classes('w-full p-6'):
@@ -1108,7 +1168,6 @@ def user_management_page():
     if not require_admin(auth_manager):
         return
 
-    ui.dark_mode(True)
     render_app_header(auth_manager)
 
     ui.label('User Management').classes('text-xl font-bold px-4 pt-4')
@@ -1392,7 +1451,6 @@ def user_activity_page():
     if not require_admin(auth_manager):
         return
 
-    ui.dark_mode(True)
     render_app_header(auth_manager)
 
     with ui.card().classes('w-full p-6'):
