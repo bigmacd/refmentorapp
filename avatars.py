@@ -42,8 +42,8 @@ def avatar_path(user_id: int) -> Path:
 def _db(db=None):
     if db is not None:
         return db
-    from database import RefereeDbCockroach
-    return RefereeDbCockroach()
+    from database import get_db
+    return get_db()
 
 
 def _forget_legacy_file(user_id: int) -> None:

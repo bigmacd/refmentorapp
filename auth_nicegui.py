@@ -26,7 +26,7 @@ from avatars import (
     has_avatar,
     save_avatar,
 )
-from database import RefereeDbCockroach
+from database import RefereeDbCockroach, get_db
 from sendemail import SendMailSimple
 
 # Password validation schema
@@ -85,7 +85,7 @@ class AuthManager:
     """Handles user authentication and session management"""
 
     def __init__(self):
-        self.db = RefereeDbCockroach()
+        self.db = get_db()
 
     def hash_password(self, password: str, salt: str = None) -> Tuple[str, str]:
         """Hash a password with salt"""
@@ -448,7 +448,7 @@ def get_dark_mode_preference() -> bool:
         user_id = None
     if user_id is not None:
         try:
-            settings = RefereeDbCockroach().getUserSettings(user_id)
+            settings = get_db().getUserSettings(user_id)
             if 'dark_mode' in settings:
                 enabled = _as_bool(settings['dark_mode'], DEFAULT_DARK_MODE)
                 try:
@@ -474,7 +474,7 @@ def persist_dark_mode_preference(enabled: bool) -> None:
         user_id = None
     if user_id is not None:
         try:
-            RefereeDbCockroach().updateUserSetting(user_id, 'dark_mode', enabled)
+            get_db().updateUserSetting(user_id, 'dark_mode', enabled)
         except Exception:
             logging.exception('Could not save dark mode to database')
     else:

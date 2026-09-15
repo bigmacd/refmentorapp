@@ -1921,3 +1921,22 @@ class RefereeDbCockroach(object):
         return [f"{row[0].capitalize()} {row[1].capitalize()}" for row in rows]
 
 
+def use_sqlite_backend() -> bool:
+    """True when this process should use RefereeDbSqlite instead of Cockroach."""
+    backend = (os.environ.get('DB_BACKEND') or '').strip().lower()
+    if backend in ('sqlite', 'sqlite3'):
+        return True
+    if backend in ('cockroach', 'cockroachdb', 'postgres', 'postgresql'):
+        return False
+    url = (os.environ.get('db_url') or os.environ.get('DATABASE_URL') or '').strip()
+    return url.startswith('sqlite:')
+
+
+def get_db():
+    """Return the active database implementation (Cockroach by default, SQLite for demo/local)."""
+    if use_sqlite_backend():
+        from database_sqlite import RefereeDbSqlite
+        return RefereeDbSqlite()
+    return RefereeDbCockroach()
+
+

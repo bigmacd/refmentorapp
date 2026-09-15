@@ -17,20 +17,20 @@ from data_store import (
     save_meta,
     save_workload,
 )
-from database import RefereeDbCockroach
+from database import RefereeDbCockroach, get_db
 from generateWorkload import WorkloadGenerator
 
 logger = logging.getLogger(__name__)
 
 
 def list_organization_ids(db: Optional[RefereeDbCockroach] = None) -> list[int]:
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     return [org['id'] for org in db.getOrganizations()]
 
 
 def sync_match_schedule(organization_id: int, db: Optional[RefereeDbCockroach] = None) -> dict:
     """Fetch season match schedule from the org's provider and write to disk."""
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     org = db.getOrganizationById(organization_id)
     if not org:
         raise ValueError(f'Organization id {organization_id} not found')
@@ -83,7 +83,7 @@ def sync_organization(organization_id: int, db: Optional[RefereeDbCockroach] = N
     Full sync for one organization: match schedule then workload.
     Errors on one step are recorded in meta; the other step still runs.
     """
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     org = db.getOrganizationById(organization_id)
     if not org:
         raise ValueError(f'Organization id {organization_id} not found')
@@ -127,7 +127,7 @@ def sync_organization(organization_id: int, db: Optional[RefereeDbCockroach] = N
 
 def sync_all_organizations(db: Optional[RefereeDbCockroach] = None) -> list[dict]:
     """Sync every organization in the database."""
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     results = []
     for org_id in list_organization_ids(db):
         try:

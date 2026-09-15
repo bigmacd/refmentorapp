@@ -3,7 +3,7 @@ import mechanicalsoup
 import time
 import logging
 
-from database import RefereeDbCockroach
+from database import get_db
 from refWebSites import MySoccerLeague
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     # metrics
     # {'gamesPlayed': 452, 'totalRefAssignments': 944, 'refsAssigned': 908, 'refsMissing': 36, 'missingCenters': 0, 'missingARs': 36}
 
-    reportMetrics = RefereeDbCockroach().getMentoringSessionMetrics(2025, 'fall')
+    reportMetrics = get_db().getMentoringSessionMetrics(2025, 'fall')
 
     # reportMetrics
     # {'mentors': 5, 'referees': 31, 'reports': 52}

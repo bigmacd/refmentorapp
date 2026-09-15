@@ -2,8 +2,7 @@
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-# Multi-process: `app` serves the UI; `worker` runs sync_worker.py on a schedule.
-# Both processes should run on the same machine so they share the /data volume.
+# Single process group: worker + UI on the same machine so they share /data.
 # Create the volume once: fly volumes create data_cache --region iad --size 1
 
 app = 'refmentorassignments'
@@ -38,4 +37,4 @@ primary_region = 'iad'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
-  processes = ['app', 'worker']
+  processes = ['app']

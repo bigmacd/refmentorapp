@@ -5,7 +5,7 @@ from typing import Optional
 
 from assignment_providers import get_workload_config, get_assignment_provider
 from data_store import allow_live_fetch, load_match_schedule, save_match_schedule
-from database import RefereeDbCockroach
+from database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class UIData:
         return elapsed >= self._ttl_seconds
 
     def _fetch_data(self, organization_id: int) -> dict:
-        db = RefereeDbCockroach()
+        db = get_db()
         org = db.getOrganizationById(organization_id)
         if not org:
             raise ValueError(f'Organization id {organization_id} not found')
@@ -153,5 +153,5 @@ def getAllData(organization_id: int = None, force_refresh: bool = False) -> dict
     (ORGANIZATION_ID env / Default / first org) for background startup.
     """
     if organization_id is None:
-        organization_id = RefereeDbCockroach().getDefaultOrganizationId()
+        organization_id = get_db().getDefaultOrganizationId()
     return UIData().getAllData(organization_id, force_refresh=force_refresh)

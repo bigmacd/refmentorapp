@@ -1,7 +1,7 @@
 
 import threading
 
-from database import RefereeDbCockroach
+from database import get_db
 from auth_nicegui import AuthManager
 from uiData import getAllData
 from generateWorkload import WorkloadGenerator, resolve_workload_organization_id
@@ -14,7 +14,7 @@ class AppState:
         self.logger = logger
         self.ui = ui
         self.auth_manager = AuthManager()
-        self.db = RefereeDbCockroach()
+        self.db = get_db()
         self.all_match_data = None
         self.dates = []
         self.match_data_org_id = None

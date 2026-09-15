@@ -4,7 +4,7 @@ from typing import Optional
 from io import StringIO
 from contextlib import redirect_stdout
 
-from database import RefereeDbCockroach
+from database import RefereeDbCockroach, get_db
 from assignment_providers import (
     get_workload_config,
     get_assignment_provider,
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def getRefsAlreadyMentored(organization_id: int = None) -> dict:
     """Pull the names of all referees already mentored this season."""
-    db = RefereeDbCockroach()
+    db = get_db()
     return db.getMentoringSessions(organization_id)
 
 
@@ -30,7 +30,7 @@ def adjustDbNewRefs(inRefs: list) -> list:
 
 def getRiskyRefs(organization_id: int = None) -> list:
     retVal = []
-    db = RefereeDbCockroach()
+    db = get_db()
     refs = db.getRisky(organization_id)
     for ref in refs:
         retVal.append(f'{ref[1]} {ref[0]}')
@@ -160,7 +160,7 @@ class WorkloadGenerator:
         stdout_capture = StringIO()
 
         with redirect_stdout(stdout_capture):
-            db = RefereeDbCockroach()
+            db = get_db()
             org = db.getOrganizationById(organization_id)
             if not org:
                 raise ValueError(f'Organization id {organization_id} not found')
@@ -281,7 +281,7 @@ def resolve_workload_organization_id(db: RefereeDbCockroach, organization_id: in
 
 def run(organization_id: int = None) -> dict:
     """Generate workload for an organization and return structured results."""
-    db = RefereeDbCockroach()
+    db = get_db()
     org_id = resolve_workload_organization_id(db, organization_id)
     generator = WorkloadGenerator()
     output = generator.get_workload_output(org_id)
