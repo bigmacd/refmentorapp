@@ -1088,7 +1088,12 @@ def render_reports_tab():
 
                 elif report_type.value == 'by referee':
                     referees = [' '] + state.db.getRefereesForSelectionBox(org_id)
-                    sel = ui.select(referees, label='Select Referee').classes('w-full')
+                    sel = ui.select(
+                        referees,
+                        label='Select Referee',
+                        with_input=True,
+                        clearable=True,
+                    ).classes('w-full')
                     sel.on_value_change(lambda: set_selection('referee', sel.value))
 
                 elif report_type.value == 'by mentor':
