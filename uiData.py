@@ -57,6 +57,17 @@ class UIData:
         config = get_workload_config(org)
         provider = get_assignment_provider(config)
         if provider is None:
+            cached = load_match_schedule(organization_id)
+            if cached:
+                logger.info(
+                    'No live assignment provider for org %s (%s, provider=%s); using cached match schedule (%s dates)',
+                    organization_id,
+                    org.get('name'),
+                    config.provider,
+                    len(cached),
+                )
+                self._cache[organization_id] = {'data': cached, 'fetched_at': datetime.now()}
+                return cached
             logger.warning(
                 'No assignment provider for org %s (%s); returning empty match schedule',
                 organization_id,

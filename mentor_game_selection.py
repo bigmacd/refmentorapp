@@ -320,7 +320,10 @@ class MentorGameSelection:
                         with card:
                             ui.label('Select Games to Mentor').classes('text-xl font-bold mb-4')
                             ui.label(f'Mentor: {self.current_mentor_name}').classes('mb-4 font-semibold')
-                            self._render_content_after_header()
+                            if not self.all_match_data:
+                                ui.label('No games are scheduled for this organization yet.').classes('text-gray-500 mt-4')
+                            else:
+                                self._render_content_after_header()
                     else:
                         ui.timer(0.5, check_match_data_loaded, once=True)
 
@@ -338,6 +341,9 @@ class MentorGameSelection:
         # Get weekend dates
         weekend_dates = self._get_weekend_dates()
         weekend_dates = self._organizeDatesIntoWeekends(weekend_dates)
+        if not weekend_dates:
+            ui.label('No games are scheduled for this organization yet.').classes('text-gray-500 mt-4')
+            return
         # weekend_dates example:
         # [
         #   ['Friday, January 9, 2026', 'Saturday, January 10, 2026'],

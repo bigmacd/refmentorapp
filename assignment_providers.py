@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 # Provider identifiers (extend as new platforms are added).
 PROVIDER_MYSOCCERLEAGUE = 'mysoccerleague'
+PROVIDER_CACHE = 'cache'
 PROVIDER_NONE = 'none'
 
 NEW_REF_SOURCE_VYS_GOOGLE_SHEET = 'vys_google_sheet'
@@ -152,6 +153,12 @@ def _is_vys_org(org: dict) -> bool:
     return slug == 'vys' or name == 'vys' or 'vys' in name.split()
 
 
+def _is_demo_org(org: dict) -> bool:
+    slug = (org.get('slug') or '').lower()
+    name = (org.get('name') or '').lower()
+    return slug == 'demo' or name == 'demo'
+
+
 def get_workload_config(org: dict) -> OrganizationWorkloadConfig:
     """Map an organization record to its workload/assignment configuration."""
     org_id = org['id']
@@ -165,6 +172,15 @@ def get_workload_config(org: dict) -> OrganizationWorkloadConfig:
             name=name,
             provider=PROVIDER_MYSOCCERLEAGUE,
             new_ref_source=NEW_REF_SOURCE_VYS_GOOGLE_SHEET,
+        )
+
+    if _is_demo_org(org):
+        return OrganizationWorkloadConfig(
+            organization_id=org_id,
+            slug=slug,
+            name=name,
+            provider=PROVIDER_CACHE,
+            new_ref_source=NEW_REF_SOURCE_DATABASE,
         )
 
     return OrganizationWorkloadConfig(

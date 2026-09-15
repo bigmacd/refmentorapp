@@ -10,7 +10,7 @@ from assignment_providers import (
     get_assignment_provider,
     sync_new_referees,
 )
-from data_store import allow_live_fetch, has_workload, load_workload
+from data_store import allow_live_fetch, load_workload
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,15 @@ class WorkloadGenerator:
 
             provider = get_assignment_provider(config)
             if provider is None:
+                cached = load_workload(organization_id)
+                if cached is not None:
+                    logger.info(
+                        'No live assignment provider for %s (id=%s, provider=%s); using cached workload',
+                        org['name'],
+                        organization_id,
+                        config.provider,
+                    )
+                    return cached
                 print(
                     f"No assignment provider is configured for {org['name']}. "
                     "Workload generation is not available for this organization yet."

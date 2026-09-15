@@ -5,7 +5,7 @@ from database import get_db
 from auth_nicegui import AuthManager
 from uiData import getAllData
 from generateWorkload import WorkloadGenerator, resolve_workload_organization_id
-from data_store import has_match_schedule, has_workload, load_meta
+from data_store import has_match_schedule, has_workload, load_match_schedule, load_meta, load_workload
 
 
 # Global state
@@ -41,10 +41,12 @@ class AppState:
         org_id = self._data_org_id(organization_id)
 
         with self._load_lock:
+            disk_schedule = load_match_schedule(org_id) or {}
             should_load = (
                 force_reload
                 or self.all_match_data is None
                 or self.match_data_org_id != org_id
+                or (not self.all_match_data and disk_schedule)
             )
             if should_load and not self._loading:
                 self._loading = True
@@ -71,12 +73,12 @@ class AppState:
         org_id = self._data_org_id(organization_id)
         if (
             self.loaded
-            and self.all_match_data is not None
+            and self.all_match_data
             and self.match_data_org_id == org_id
         ):
             return True
         # Cache on disk counts even before this process has loaded it into memory
-        return has_match_schedule(org_id)
+        return bool(load_match_schedule(org_id))
 
     def load_workload_data(self, force_reload=False, organization_id=None):
         """Load workload data for the given or current organization (from cache)."""
@@ -84,11 +86,15 @@ class AppState:
         cached_org_id = getattr(self.ui, 'resultsFromRunOrgId', None)
 
         with self._workload_lock:
+            disk = load_workload(org_id)
+            disk_results = (disk[1] if disk else None) or {}
+            memory_results = getattr(self.ui, 'resultsFromRun', None)
             should_load = (
                 force_reload
                 or cached_org_id != org_id
                 or not hasattr(self.ui, 'resultsFromRun')
-                or self.ui.resultsFromRun is None
+                or memory_results is None
+                or (not memory_results and disk_results)
             )
             if should_load and not self.workload_loading:
                 self.workload_loading = True
