@@ -37,7 +37,6 @@ class MentorGameSelection:
         self.ensure_match_data = ensure_match_data
         self.ensure_workload = ensure_workload
         self.logger = logger or logging.getLogger(__name__)
-        self.current_user = None
         self.current_mentor_name = None
 
     def _current_org_id(self) -> int:
@@ -287,19 +286,12 @@ class MentorGameSelection:
     def render(self):
         """Render the mentor game selection interface"""
         self._ensure_workload_for_org()
-        # Get current user and determine mentor name
-        self.current_user = self.auth_manager.get_current_user()
-
-        # Get mentors list
-        mentors = self.db.getMentors(self._current_org_id())
-        mentor_values = sorted([f'{m[0].capitalize()} {m[1].capitalize()}' for m in mentors])
-
-        # Filter to current user if not admin
-        filtered = [v for v in mentor_values if v.lower().startswith(self.current_user.lower())]
-        if filtered:
-            mentor_values = filtered
-
-        self.current_mentor_name = mentor_values[0] if mentor_values else None
+        # Identify the logged-in mentor by user id / full name, not username prefix
+        self.current_mentor_name = self.auth_manager.get_current_mentor_display_name()
+        if not self.current_mentor_name:
+            mentors = self.db.getMentors(self._current_org_id())
+            mentor_values = sorted([f'{m[0].capitalize()} {m[1].capitalize()}' for m in mentors])
+            self.current_mentor_name = mentor_values[0] if mentor_values else None
 
         card = ui.card().classes('form-container w-full')
         with card:

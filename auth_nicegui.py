@@ -162,6 +162,22 @@ class AuthManager:
         """Get the current authenticated user id"""
         return self._storage_get('user_id')
 
+    def get_current_mentor_display_name(self) -> Optional[str]:
+        """Return the logged-in user's mentor display name, unique by user id."""
+        user_id = self.get_current_user_id()
+        if user_id is None:
+            return None
+        return self.db.getMentorDisplayNameForUser(user_id)
+
+    def filter_mentor_display_names(self, mentor_values: list) -> list:
+        """Keep the current user's name only; admins still see every mentor."""
+        if self.is_admin():
+            return list(mentor_values)
+        current_name = self.get_current_mentor_display_name()
+        if not current_name:
+            return list(mentor_values)
+        return [v for v in mentor_values if v.lower() == current_name.lower()]
+
     def get_current_email(self) -> Optional[str]:
         """Get the current authenticated user's email"""
         return self._storage_get('email')

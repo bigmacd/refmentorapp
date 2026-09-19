@@ -833,15 +833,14 @@ def _build_mentor_report_form(container):
         org_id = current_org_id()
         mentors = state.db.getMentors(org_id)
         mentor_values = sorted([f'{m[0].capitalize()} {m[1].capitalize()}' for m in mentors])
+        current_name = state.auth_manager.get_current_mentor_display_name()
+        mentor_values = state.auth_manager.filter_mentor_display_names(mentor_values)
+        default_mentor = next(
+            (v for v in mentor_values if current_name and v.lower() == current_name.lower()),
+            mentor_values[0] if mentor_values else None,
+        )
 
-        # Filter to current user if not admin
-        current_user = state.auth_manager.get_current_user()
-        if current_user:
-            filtered = [v for v in mentor_values if v.lower().startswith(current_user.lower())]
-            if filtered:
-                mentor_values = filtered
-
-        mentor_select = ui.select(mentor_values, label='Select Mentor', value=mentor_values[0] if mentor_values else None)
+        mentor_select = ui.select(mentor_values, label='Select Mentor', value=default_mentor)
         mentor_select.classes('w-full')
 
         # Date selection

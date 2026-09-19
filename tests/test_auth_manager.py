@@ -216,6 +216,32 @@ class TestAuthManagerPasswordReset(unittest.TestCase):
         self.assertIn('token=tok%2Fen%2B1', url)
         self.assertIn('email=a%2Bb%40example.com', url)
 
+    def test_filter_mentor_display_names_uses_full_name_not_username_prefix(self):
+        """Username 'david' must not match every mentor named David."""
+        self.auth_manager.get_current_user_id = Mock(return_value=11)
+        self.auth_manager.is_admin = Mock(return_value=False)
+        self.auth_manager.db.getMentorDisplayNameForUser.return_value = 'David Helfgott'
+        mentors = ['David Dunlap', 'David Helfgott', 'Martin Cooley']
+
+        self.assertEqual(
+            self.auth_manager.filter_mentor_display_names(mentors),
+            ['David Helfgott'],
+        )
+        self.auth_manager.db.getMentorDisplayNameForUser.assert_called_once_with(11)
+
+    def test_filter_mentor_display_names_admin_sees_all(self):
+        self.auth_manager.get_current_user_id = Mock(return_value=1)
+        self.auth_manager.is_admin = Mock(return_value=True)
+        mentors = ['David Dunlap', 'David Helfgott', 'Martin Cooley']
+
+        self.assertEqual(self.auth_manager.filter_mentor_display_names(mentors), mentors)
+        self.auth_manager.db.getMentorDisplayNameForUser.assert_not_called()
+
+    def test_get_current_mentor_display_name_looks_up_by_user_id(self):
+        self.auth_manager.get_current_user_id = Mock(return_value=11)
+        self.auth_manager.db.getMentorDisplayNameForUser.return_value = 'David Helfgott'
+        self.assertEqual(self.auth_manager.get_current_mentor_display_name(), 'David Helfgott')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -794,6 +794,23 @@ class RefereeDbCockroach(object):
             retVal.append(f'{mentor[0].capitalize()} {mentor[1].capitalize()}')
         return retVal
 
+    @staticmethod
+    def formatMentorDisplayName(first_name: str, last_name: str) -> str:
+        return f'{first_name.capitalize()} {last_name.capitalize()}'
+
+    def getMentorDisplayNameForUser(self, user_id: int) -> Optional[str]:
+        """Return 'Firstname Lastname' for a user, or None if names are missing."""
+        sql = "SELECT first_name, last_name FROM users WHERE id = %s"
+        self.executeSql(sql, (user_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            return None
+        first_name = (row[0] or '').strip()
+        last_name = (row[1] or '').strip()
+        if not first_name or not last_name:
+            return None
+        return self.formatMentorDisplayName(first_name, last_name)
+
 
     def getNewReferees(self, organization_id: int = None) -> list:
         today = datetime.today()
