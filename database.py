@@ -834,7 +834,7 @@ class RefereeDbCockroach(object):
     def findMentor(self, firstname: str, lastname: str, organization_id: int = None) -> list:
         """Mentors are application users (multi-tenant); id is users.id."""
         org_id = self._resolve_organization_id(organization_id)
-        sql = """SELECT u.* FROM users u
+        sql = """SELECT u.id, u.first_name, u.last_name, u.role FROM users u
                  JOIN user_organizations uo ON u.id = uo.user_id
                  WHERE LOWER(u.last_name) = %s AND LOWER(u.first_name) = %s
                    AND uo.organization_id = %s"""
