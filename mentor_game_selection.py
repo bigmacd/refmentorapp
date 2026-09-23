@@ -10,7 +10,7 @@ import logging
 from typing import Callable, Optional, Tuple, Any
 from nicegui import ui
 
-from generateWorkload import position_status_text
+from generateWorkload import name_is_new_ref, position_status_text, referee_experience_text
 
 
 class MentorGameSelection:
@@ -133,10 +133,20 @@ class MentorGameSelection:
 
 
     def _render_ref_line(self, position: str, name: str, already_mentored: bool,
-                         needs_followup: bool, *, as_ar: bool = False) -> None:
-        note = position_status_text(already_mentored, needs_followup, as_ar=as_ar)
+                         needs_followup: bool, is_new_ref: bool, *, as_ar: bool = False) -> None:
+        has_name = bool(name) and name.strip().lower() != 'none'
+        # "Already mentored" is only meaningful for new referees; follow-up can apply to anyone.
+        note = position_status_text(
+            already_mentored and is_new_ref,
+            needs_followup,
+            as_ar=as_ar,
+        )
         with ui.row().classes('items-baseline gap-x-2 flex-wrap'):
-            ui.label(f"{position}: {name or 'None'}").classes('text-sm')
+            name_classes = 'text-sm font-semibold' if is_new_ref and has_name else 'text-sm'
+            ui.label(f"{position}: {name or 'None'}").classes(name_classes)
+            if has_name:
+                identity_color = 'text-green-700 font-semibold' if is_new_ref else 'text-gray-500 italic'
+                ui.label(referee_experience_text(is_new_ref)).classes(f'text-xs {identity_color}')
             if note:
                 color = 'text-amber-700' if needs_followup else 'text-gray-500'
                 ui.label(note).classes(f'text-xs italic {color}')
@@ -178,17 +188,20 @@ class MentorGameSelection:
                                             'Center', game.get('Center', 'None'),
                                             game.get('already_mentored_center', False),
                                             game.get('needs_followup_center', False),
+                                            game.get('new_ref_center', False),
                                         )
                                         self._render_ref_line(
                                             'AR1', game.get('AR1', 'None'),
                                             game.get('already_mentored_ar1', False),
                                             game.get('needs_followup_ar1', False),
+                                            game.get('new_ref_ar1', False),
                                             as_ar=True,
                                         )
                                         self._render_ref_line(
                                             'AR2', game.get('AR2', 'None'),
                                             game.get('already_mentored_ar2', False),
                                             game.get('needs_followup_ar2', False),
+                                            game.get('new_ref_ar2', False),
                                             as_ar=True,
                                         )
 
@@ -322,7 +335,11 @@ class MentorGameSelection:
         card = ui.card().classes('form-container w-full')
         with card:
             ui.label('Select Games to Mentor').classes('text-xl font-bold mb-4')
-            ui.label(f'Mentor: {self.current_mentor_name}').classes('mb-4 font-semibold')
+            ui.label(f'Mentor: {self.current_mentor_name}').classes('mb-2 font-semibold')
+            ui.label(
+                'Only games with new referees are listed. Each crew member is labeled '
+                'new or experienced so the mentoring focus is clear.'
+            ).classes('text-sm text-gray-600 mb-4')
 
             # Check if data is loaded into memory (disk cache may exist before load_data runs)
             if self.all_match_data is None:
@@ -337,7 +354,11 @@ class MentorGameSelection:
                         card.clear()
                         with card:
                             ui.label('Select Games to Mentor').classes('text-xl font-bold mb-4')
-                            ui.label(f'Mentor: {self.current_mentor_name}').classes('mb-4 font-semibold')
+                            ui.label(f'Mentor: {self.current_mentor_name}').classes('mb-2 font-semibold')
+                            ui.label(
+                                'Only games with new referees are listed. Each crew member is labeled '
+                                'new or experienced so the mentoring focus is clear.'
+                            ).classes('text-sm text-gray-600 mb-4')
                             self._render_content_after_header()
                     else:
                         ui.timer(0.5, check_match_data_loaded, once=True)
@@ -397,6 +418,14 @@ class MentorGameSelection:
                 return None
                 #except KeyError:
                 #    return None
+            new_ref_names = {
+                f'{firstname} {lastname}'.strip().lower()
+                for firstname, lastname in self.db.getNewReferees(self._current_org_id())
+            }
+            def position_is_new(workload_game: dict, flag_key: str, crew_name: str) -> bool:
+                if flag_key in workload_game:
+                    return bool(workload_game[flag_key])
+                return name_is_new_ref(crew_name, new_ref_names)
             dateToMatch = convertDate(date)
             for field in ui.resultsFromRun.keys():
                 if field not in newRefRecords:
@@ -419,6 +448,12 @@ class MentorGameSelection:
                                 'needs_followup_ar1', game.get('a1risky') == '##')
                             display_game['needs_followup_ar2'] = game.get(
                                 'needs_followup_ar2', game.get('a2risky') == '##')
+                            display_game['new_ref_center'] = position_is_new(
+                                game, 'new_ref_center', display_game.get('Center'))
+                            display_game['new_ref_ar1'] = position_is_new(
+                                game, 'new_ref_ar1', display_game.get('AR1'))
+                            display_game['new_ref_ar2'] = position_is_new(
+                                game, 'new_ref_ar2', display_game.get('AR2'))
                             newRefRecords[field].append(display_game)
 
                 if field in newRefRecords and len(newRefRecords[field]) == 0:

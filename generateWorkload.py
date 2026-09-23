@@ -37,6 +37,23 @@ def getRiskyRefs(organization_id: int = None) -> list:
     return retVal
 
 
+def normalize_ref_name(name: Optional[str]) -> str:
+    if not name:
+        return ''
+    return name.strip().lower()
+
+
+def name_is_new_ref(name: Optional[str], new_ref_names: set[str]) -> bool:
+    normalized = normalize_ref_name(name)
+    if not normalized or normalized == 'none':
+        return False
+    return normalized in new_ref_names
+
+
+def referee_experience_text(is_new_ref: bool) -> str:
+    return 'new referee' if is_new_ref else 'experienced'
+
+
 def position_status_text(already_mentored: bool, needs_followup: bool, *, as_ar: bool = False) -> str:
     parts = []
     if already_mentored:
@@ -58,6 +75,8 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
         current[c] = currentu[c]
 
     retVal = {}
+    # Snapshot before generateWorkload removes already-mentored names from newRefs.
+    new_ref_names = {normalize_ref_name(name) for name in newRefs}
 
     for field, details in current.items():
         fieldsOnce = False
@@ -69,6 +88,10 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
 
             if center not in newRefs and ar1 not in newRefs and ar2 not in newRefs:
                 continue
+
+            new_ref_center = name_is_new_ref(center, new_ref_names)
+            new_ref_ar1 = name_is_new_ref(ar1, new_ref_names)
+            new_ref_ar2 = name_is_new_ref(ar2, new_ref_names)
 
             already_mentored_center = center in mentored and 'Center' in mentored[center]
             already_mentored_ar1 = ar1 in mentored and ('AR1' in mentored[ar1] or 'AR2' in mentored[ar1])
@@ -122,6 +145,9 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
             retVal[field][game]['needs_followup_center'] = needs_followup_center
             retVal[field][game]['needs_followup_ar1'] = needs_followup_ar1
             retVal[field][game]['needs_followup_ar2'] = needs_followup_ar2
+            retVal[field][game]['new_ref_center'] = new_ref_center
+            retVal[field][game]['new_ref_ar1'] = new_ref_ar1
+            retVal[field][game]['new_ref_ar2'] = new_ref_ar2
 
             print(f'\tID: {game}, Date: {date}, Time: {gameTime}, Age: {age}, Level: {level}')
 
