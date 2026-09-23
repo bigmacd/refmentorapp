@@ -10,6 +10,8 @@ import logging
 from typing import Callable, Optional, Tuple, Any
 from nicegui import ui
 
+from generateWorkload import position_status_text
+
 
 class MentorGameSelection:
     """Component for mentors to select games they want to mentor"""
@@ -130,6 +132,16 @@ class MentorGameSelection:
                 checkbox_ref.tooltip(None)
 
 
+    def _render_ref_line(self, position: str, name: str, already_mentored: bool,
+                         needs_followup: bool, *, as_ar: bool = False) -> None:
+        note = position_status_text(already_mentored, needs_followup, as_ar=as_ar)
+        with ui.row().classes('items-baseline gap-x-2 flex-wrap'):
+            ui.label(f"{position}: {name or 'None'}").classes('text-sm')
+            if note:
+                color = 'text-amber-700' if needs_followup else 'text-gray-500'
+                ui.label(note).classes(f'text-xs italic {color}')
+
+
     def _render_day_section(self, date_str, games_by_venue):
         """Render games for a specific day"""
 
@@ -162,9 +174,23 @@ class MentorGameSelection:
                                     # Middle column: Referees
                                     with ui.column().classes('flex-1 gap-1'):
                                         ui.label('Referees:').classes('font-semibold text-sm')
-                                        ui.label(f"Center: {game.get('Center', 'None')}").classes('text-sm')
-                                        ui.label(f"AR1: {game.get('AR1', 'None')}").classes('text-sm')
-                                        ui.label(f"AR2: {game.get('AR2', 'None')}").classes('text-sm')
+                                        self._render_ref_line(
+                                            'Center', game.get('Center', 'None'),
+                                            game.get('already_mentored_center', False),
+                                            game.get('needs_followup_center', False),
+                                        )
+                                        self._render_ref_line(
+                                            'AR1', game.get('AR1', 'None'),
+                                            game.get('already_mentored_ar1', False),
+                                            game.get('needs_followup_ar1', False),
+                                            as_ar=True,
+                                        )
+                                        self._render_ref_line(
+                                            'AR2', game.get('AR2', 'None'),
+                                            game.get('already_mentored_ar2', False),
+                                            game.get('needs_followup_ar2', False),
+                                            as_ar=True,
+                                        )
 
                                     # Right column: Selection and selected by info
                                     with ui.column().classes('flex-1 gap-2 items-end'):
@@ -379,12 +405,20 @@ class MentorGameSelection:
                     if game['date'] == dateToMatch:
                         allDataGame = findGame(gameId, field)
 
-                        # stop-gap fix.
                         if allDataGame is not None:
-                            display_game = dict(allDataGame)  # shallow copy — enough for string fields
-                            display_game['Center'] = f"{allDataGame['Center']} {game['cmarker']} {game['crisky']}".strip()
-                            display_game['AR1'] = f"{allDataGame['AR1']} {game['a1marker']} {game['a1risky']}".strip()
-                            display_game['AR2'] = f"{allDataGame['AR2']} {game['a2marker']} {game['a2risky']}".strip()
+                            display_game = dict(allDataGame)
+                            display_game['already_mentored_center'] = game.get(
+                                'already_mentored_center', game.get('cmarker') == '**')
+                            display_game['already_mentored_ar1'] = game.get(
+                                'already_mentored_ar1', game.get('a1marker') == '**')
+                            display_game['already_mentored_ar2'] = game.get(
+                                'already_mentored_ar2', game.get('a2marker') == '**')
+                            display_game['needs_followup_center'] = game.get(
+                                'needs_followup_center', game.get('crisky') == '##')
+                            display_game['needs_followup_ar1'] = game.get(
+                                'needs_followup_ar1', game.get('a1risky') == '##')
+                            display_game['needs_followup_ar2'] = game.get(
+                                'needs_followup_ar2', game.get('a2risky') == '##')
                             newRefRecords[field].append(display_game)
 
                 if field in newRefRecords and len(newRefRecords[field]) == 0:

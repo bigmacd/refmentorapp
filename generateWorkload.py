@@ -37,6 +37,20 @@ def getRiskyRefs(organization_id: int = None) -> list:
     return retVal
 
 
+def position_status_text(already_mentored: bool, needs_followup: bool, *, as_ar: bool = False) -> str:
+    parts = []
+    if already_mentored:
+        parts.append('already mentored as AR' if as_ar else 'already mentored at this position')
+    if needs_followup:
+        parts.append('needs additional help')
+    return '; '.join(parts)
+
+
+def _position_note(already_mentored: bool, needs_followup: bool, *, as_ar: bool = False) -> str:
+    text = position_status_text(already_mentored, needs_followup, as_ar=as_ar)
+    return f' ({text})' if text else ''
+
+
 def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list) -> dict:
 
     current = {}
@@ -56,33 +70,25 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
             if center not in newRefs and ar1 not in newRefs and ar2 not in newRefs:
                 continue
 
-            cmarker = ''
-            if center in mentored and 'Center' in mentored[center]:
-                cmarker = '**'
-            a1marker = ''
-            if ar1 in mentored and ('AR1' in mentored[ar1] or 'AR2' in mentored[ar1]):
-                a1marker = '**'
-            a2marker = ''
-            if ar2 in mentored and ('AR2' in mentored[ar2] or 'AR1' in mentored[ar2]):
-                a2marker = '**'
+            already_mentored_center = center in mentored and 'Center' in mentored[center]
+            already_mentored_ar1 = ar1 in mentored and ('AR1' in mentored[ar1] or 'AR2' in mentored[ar1])
+            already_mentored_ar2 = ar2 in mentored and ('AR2' in mentored[ar2] or 'AR1' in mentored[ar2])
+            needs_followup_center = center in risky
+            needs_followup_ar1 = ar1 in risky
+            needs_followup_ar2 = ar2 in risky
 
-            crisky = '##' if center in risky else ''
-            a1risky = '##' if ar1 in risky else ''
-            a2risky = '##' if ar2 in risky else ''
-
-            # trying to reduce output a bit
-            # if the crew is new and has already been mentored (but not flagged as needed follow-up), skip
+            # Skip new refs who have already been mentored and are not flagged for follow-up.
             enabled = os.getenv("showmentored", "").lower() in ("true", "1", "yes")
             if not enabled:
 
                 if center in newRefs:
-                    if cmarker == '**' and crisky == '':
+                    if already_mentored_center and not needs_followup_center:
                         newRefs.remove(center)
                 if ar1 in newRefs:
-                    if a1marker == '**' and a1risky == '':
+                    if already_mentored_ar1 and not needs_followup_ar1:
                         newRefs.remove(ar1)
                 if ar2 in newRefs:
-                    if a2marker == '**' and a2risky == '':
+                    if already_mentored_ar2 and not needs_followup_ar2:
                         newRefs.remove(ar2)
                 if center not in newRefs and ar1 not in newRefs and ar2 not in newRefs:
                     continue
@@ -110,27 +116,27 @@ def generateWorkload(currentu: list, newRefs: list, mentored: list, risky: list)
             retVal[field][game]['gameTime'] = gameTime
             retVal[field][game]['age'] = age
             retVal[field][game]['level'] = level
-            retVal[field][game]['cmarker'] = cmarker
-            retVal[field][game]['a1marker'] = a1marker
-            retVal[field][game]['a2marker'] = a2marker
-            retVal[field][game]['crisky'] = crisky
-            retVal[field][game]['a1risky'] = a1risky
-            retVal[field][game]['a2risky'] = a2risky
+            retVal[field][game]['already_mentored_center'] = already_mentored_center
+            retVal[field][game]['already_mentored_ar1'] = already_mentored_ar1
+            retVal[field][game]['already_mentored_ar2'] = already_mentored_ar2
+            retVal[field][game]['needs_followup_center'] = needs_followup_center
+            retVal[field][game]['needs_followup_ar1'] = needs_followup_ar1
+            retVal[field][game]['needs_followup_ar2'] = needs_followup_ar2
 
             print(f'\tID: {game}, Date: {date}, Time: {gameTime}, Age: {age}, Level: {level}')
 
             if center in newRefs:
-                print(f'\t\tNew Ref at Center: {center.title()}{cmarker} {crisky}')
+                note = _position_note(already_mentored_center, needs_followup_center)
+                print(f'\t\tNew Ref at Center: {center.title()}{note}')
 
             if ar1 in newRefs:
-                print(f'\t\tNew Ref at AR1: {ar1.title()}{a1marker} {a1risky}')
+                note = _position_note(already_mentored_ar1, needs_followup_ar1, as_ar=True)
+                print(f'\t\tNew Ref at AR1: {ar1.title()}{note}')
 
             if ar2 in newRefs:
-                print(f'\t\tNew Ref at AR2: {ar2.title()}{a2marker} {a2risky}')
+                note = _position_note(already_mentored_ar2, needs_followup_ar2, as_ar=True)
+                print(f'\t\tNew Ref at AR2: {ar2.title()}{note}')
 
-    print("")
-    print("** Referee has already had a mentor")
-    print("## Referee has been flagged as needing additional help")
     print("")
 
     return retVal
