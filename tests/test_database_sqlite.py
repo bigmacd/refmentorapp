@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from database import use_sqlite_backend
+from database import sql_identifier, use_sqlite_backend
 from database_sqlite import RefereeDbSqlite, to_sqlite_sql
 
 
@@ -108,3 +108,53 @@ class TestRefereeDbSqlite(unittest.TestCase):
         row = self.db.getPasswordResetToken('tok-1', 'reset@example.com')
         self.assertIsNotNone(row)
         self.assertEqual(row['username'], 'resetme')
+
+    def test_sql_identifier_rejects_injection(self):
+        self.assertEqual(sql_identifier('referees'), 'referees')
+        with self.assertRaises(ValueError):
+            sql_identifier("users; DROP TABLE users")
+        with self.assertRaises(ValueError):
+            sql_identifier('mentor_game_selections" --')
+        self.assertFalse(self.db._columnExists("users; DROP TABLE users", 'id'))
+
+    def test_mentor_report_injection_payloads_are_stored_as_data(self):
+        org_id = self.db.getDefaultOrganizationId()
+        self.db.createUser('mentor1', 'h', 's', 'm@example.com', 'user', 'Pat', 'Mentor')
+        user = self.db.getUserByUsername('mentor1')
+        self.db.addUserToOrganization(user['id'], org_id)
+        self.db.addReferee('smith', 'alex', 2026, org_id)
+
+        comments = "'); DROP TABLE users;--"
+        game_id = "G1'; DELETE FROM referees;--"
+        ok, message = self.db.addMentorSessionNew(
+            'Pat Mentor',
+            'Alex Smith',
+            'Center',
+            'Saturday, May 16, 2026',
+            comments,
+            True,
+            game_id,
+            org_id,
+        )
+        self.assertTrue(ok, message)
+        self.assertTrue(self.db._tableExists('users'))
+        self.assertTrue(self.db._tableExists('referees'))
+        self.assertTrue(self.db.userExists('mentor1'))
+        self.assertIsNotNone(self.db.findReferee('smith', 'alex', org_id))
+
+        self.db.executeSql(
+            'SELECT comments, gameid FROM mentor_sessions WHERE comments = %s',
+            (comments,),
+        )
+        stored = self.db.cursor.fetchone()
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored[0], comments)
+        self.assertEqual(stored[1], game_id)
+
+        rows = self.db.getMentoringsessionsForMentor('Pat Mentor', org_id)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][4], comments)
+
+        self.assertIsNone(self.db.getUserByUsername("admin' OR '1'='1"))
+        with self.assertRaises(ValueError):
+            self.db.getMentoringSessionDetails("2026 OR 1=1 --", org_id)

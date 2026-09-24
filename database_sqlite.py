@@ -16,7 +16,7 @@ from datetime import date, datetime, time as dt_time, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from database import RefereeDbCockroach
+from database import RefereeDbCockroach, sql_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,9 @@ class RefereeDbSqlite(RefereeDbCockroach):
         return self.cursor.fetchone() is not None
 
     def _columnExists(self, table_name: str, column_name: str) -> bool:
-        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', table_name or ''):
+        try:
+            table_name = sql_identifier(table_name)
+        except ValueError:
             return False
         self.cursor.execute(f'PRAGMA table_info({table_name})')
         return any(row[1] == column_name for row in self.cursor.fetchall())
@@ -164,6 +166,7 @@ class RefereeDbSqlite(RefereeDbCockroach):
         self._migrateUserVisitsTable()
 
     def _addOrganizationIdColumn(self, table_name: str, default_org_id: int) -> None:
+        table_name = sql_identifier(table_name)
         if not self._tableExists(table_name):
             return
         if self._columnExists(table_name, 'organization_id'):
