@@ -98,6 +98,7 @@ class RefereeDbCockroach(object):
         except Exception:
             logging.exception('Could not import legacy avatar files')
         self._ensureOneMentorPerGameConstraint()
+        self._ensureUniqueGameDetailsConstraint()
 
 
     def _tableExists(self, table_name: str) -> bool:
@@ -669,6 +670,46 @@ class RefereeDbCockroach(object):
         except Exception as e:
             logging.warning("Could not enforce one-mentor-per-game uniqueness: %s", e)
 
+    def _ensureUniqueGameDetailsConstraint(self) -> None:
+        """Keep one gamedetails row per organization + gameId."""
+        if not self._tableExists('gamedetails'):
+            return
+        if not self._columnExists('gamedetails', 'organization_id'):
+            return
+        try:
+            self.executeSql(
+                """
+                SELECT 1 FROM pg_indexes
+                WHERE tablename = 'gamedetails'
+                  AND indexname = 'gamedetails_one_per_org_game'
+                """
+            )
+            if self.cursor.fetchone():
+                return
+            self.executeSql(
+                """
+                DELETE FROM gamedetails
+                WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY organization_id, gameid
+                                   ORDER BY id DESC
+                               ) AS rn
+                        FROM gamedetails
+                    ) ranked
+                    WHERE rn > 1
+                )
+                """
+            )
+            self.executeSql(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS gamedetails_one_per_org_game
+                ON gamedetails (organization_id, gameid)
+                """
+            )
+        except Exception as e:
+            logging.warning("Could not enforce unique gamedetails per game: %s", e)
 
     def addVisitor(self, email: str, username: str, role: str, ip_address: str = None, user_agent: str = None) -> None:
         """
@@ -1176,18 +1217,17 @@ class RefereeDbCockroach(object):
 
     # The below was added so we can also track the game details
 
-    def gameDetailsExist(self, gameId: str, date: str, time: str, organization_id: int) -> bool:
-        sql = "SELECT * from gamedetails where gameId = %s and date = %s and time = %s and organization_id = %s"
+    def gameDetailsExist(self, gameId: str, organization_id: int) -> bool:
+        sql = "SELECT 1 FROM gamedetails WHERE gameId = %s AND organization_id = %s"
         try:
-            self.executeSql(sql, (gameId, date, time, organization_id))
+            self.executeSql(sql, (gameId, organization_id))
         except Exception as ex:
             print(ex)
-        return not self.cursor.fetchone() == None
+        return self.cursor.fetchone() is not None
 
 
     def addGameDetails(self, currentGames: dict, organization_id: int) -> None:
-
-        sql = """insert into gamedetails (venue,
+        insert_sql = """INSERT INTO gamedetails (venue,
                                     gameId,
                                     center,
                                     ar1,
@@ -1197,23 +1237,55 @@ class RefereeDbCockroach(object):
                                     age,
                                     level,
                                     organization_id)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+
+        update_sql = """UPDATE gamedetails
+                        SET venue = %s,
+                            center = %s,
+                            ar1 = %s,
+                            ar2 = %s,
+                            date = %s,
+                            time = %s,
+                            age = %s,
+                            level = %s
+                        WHERE gameId = %s AND organization_id = %s"""
 
         for venue, gameDetails in currentGames.items():
             for gameid, game in gameDetails.items():
                 if 'VENUE CONFLICT' in gameid:
                     gameid = gameid.replace('VENUE CONFLICT', '')
-                if self.gameDetailsExist(gameid, game['date'], game['gameTime'], organization_id) is False:
-                    self.executeSql(sql, (venue,
-                                            gameid,
-                                            game['Center'],
-                                            game['AR1'],
-                                            game['AR2'],
-                                            game['date'],
-                                            game['gameTime'],
-                                            game['age'],
-                                            game['level'],
-                                            organization_id))
+                if self.gameDetailsExist(gameid, organization_id):
+                    self.executeSql(
+                        update_sql,
+                        (
+                            venue,
+                            game['Center'],
+                            game['AR1'],
+                            game['AR2'],
+                            game['date'],
+                            game['gameTime'],
+                            game['age'],
+                            game['level'],
+                            gameid,
+                            organization_id,
+                        ),
+                    )
+                else:
+                    self.executeSql(
+                        insert_sql,
+                        (
+                            venue,
+                            gameid,
+                            game['Center'],
+                            game['AR1'],
+                            game['AR2'],
+                            game['date'],
+                            game['gameTime'],
+                            game['age'],
+                            game['level'],
+                            organization_id,
+                        ),
+                    )
 
 
     def getDefaultOrganizationId(self) -> int:
