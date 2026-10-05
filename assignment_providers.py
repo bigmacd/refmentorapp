@@ -40,9 +40,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional, Protocol
 
-import mechanicalsoup
-
 from googleSheets import getRefsFromGoogleSignupSheet
+from msl_browser import PlaywrightBrowser
 from refWebSites import MySoccerLeague
 
 logger = logging.getLogger(__name__)
@@ -82,15 +81,17 @@ class AssignmentProvider(Protocol):
 class MySoccerLeagueProvider:
     """VYS and other orgs on mysoccerleague.com."""
 
-    def __init__(self, browser: Optional[mechanicalsoup.StatefulBrowser] = None):
-        self._browser = browser or self._create_browser()
+    def __init__(self, browser: Optional[PlaywrightBrowser] = None):
+        self._browser = browser
         self._site: Optional[MySoccerLeague] = None
 
-    @staticmethod
-    def _create_browser() -> mechanicalsoup.StatefulBrowser:
-        br = mechanicalsoup.StatefulBrowser(soup_config={'features': 'lxml'})
-        br.addheaders = [('User-agent', 'Chrome')]
-        return br
+    def close(self) -> None:
+        if self._site is not None:
+            self._site.close()
+            self._site = None
+        elif self._browser is not None:
+            self._browser.close()
+            self._browser = None
 
     def _site_instance(self) -> MySoccerLeague:
         if self._site is None:

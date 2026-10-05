@@ -88,6 +88,10 @@ class UIData:
             raise RuntimeError(
                 f"Failed to retrieve match data for organization {org.get('name')}: {e}"
             ) from e
+        finally:
+            closer = getattr(provider, 'close', None)
+            if closer is not None:
+                closer()
 
     def getAllData(self, organization_id: int, force_refresh: bool = False) -> dict:
         """

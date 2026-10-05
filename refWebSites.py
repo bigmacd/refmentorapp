@@ -4,10 +4,20 @@ import datetime
 import re
 import time
 import logging
+from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type, before_sleep_log
+
+from msl_browser import CloudflareChallengeError, LoginPageError, PlaywrightBrowser
 
 logger = logging.getLogger(__name__)
+
+
+def _ysl_key_from_url(url: str) -> str:
+    if not url:
+        return ''
+    values = parse_qs(urlparse(url).query).get('YSLkey') or []
+    return values[0] if values else ''
 
 # Rare given-name pairs that should stay in firstname (not get absorbed into lastname).
 _DOUBLE_FIRSTS = {
@@ -63,19 +73,27 @@ class RefereeWebSite(object):
 
 class MySoccerLeague(RefereeWebSite):
 
-    def __init__(self, br):
-        super(MySoccerLeague, self).__init__(br)
-        self._browser.session.verify = self._getCertChain()
+    def __init__(self, br=None):
+        browser = br if br is not None else PlaywrightBrowser()
+        super(MySoccerLeague, self).__init__(browser)
         self._baseUrl = self._loginPage = "https://mysoccerleague.com/YSLmobile.jsp"
         self._loginFormInput = { 'userName': os.environ['mslUsername'],
                                 'password': os.environ['mslPassword'] }
 
-        self._login()
+        try:
+            self._login()
+            logger.info("[MySoccerLeague.__init__] Calculating future dates")
+            self._getFutureDates(datetime.date.today())
+            self.emails = []
+            logger.info("[MySoccerLeague.__init__] Initialization complete")
+        except Exception:
+            self.close()
+            raise
 
-        logger.info("[MySoccerLeague.__init__] Calculating future dates")
-        self._getFutureDates(datetime.date.today())
-        self.emails = []
-        logger.info("[MySoccerLeague.__init__] Initialization complete")
+    def close(self) -> None:
+        closer = getattr(self._browser, "close", None)
+        if closer is not None:
+            closer()
 
 
     def _getCertChain(self):
@@ -95,9 +113,9 @@ class MySoccerLeague(RefereeWebSite):
 
 
     @retry(
-        stop=stop_after_attempt(20),
-        wait=wait_exponential(multiplier=1, min=2, max=60),
-        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_not_exception_type((CloudflareChallengeError, LoginPageError)),
         reraise=True,
         before_sleep=before_sleep_log(logger, logging.WARNING),
     )
@@ -138,11 +156,18 @@ class MySoccerLeague(RefereeWebSite):
 
         logger.info("[_login] Step 5: Extracting login key from response")
         try:
-            links = self._loginResponse.soup.find_all('a')
-            logger.debug(f"[_login] Found {len(links)} links in response")
-            if len(links) < 14:
-                raise IndexError(f"Expected at least 14 links, found {len(links)}")
-            self._loginKey = links[13]['href'].split('?')[1].split('&')[0].split('=')[1]
+            self._loginKey = _ysl_key_from_url(getattr(self._loginResponse, 'url', ''))
+            if not self._loginKey:
+                for link in self._loginResponse.soup.find_all('a'):
+                    href = link.get('href') or ''
+                    if 'UserHome.jsp' not in href:
+                        continue
+                    self._loginKey = _ysl_key_from_url(href)
+                    if self._loginKey:
+                        break
+            if not self._loginKey:
+                raise ValueError('Home page did not include a YSLkey')
+            logger.info("[_login] Step 5: Login key taken from the home page")
         except Exception as e:
             logger.error(f"[_login] Step 5 FAILED: Error extracting login key: {e}", exc_info=True)
             raise
@@ -390,40 +415,63 @@ class MySoccerLeague(RefereeWebSite):
 
         return results
 
+    def _referee_roster_url(self) -> str:
+        """Roster URL on the same host as the logged-in home page.
+
+        Login sets the session on mysoccerleague.com. Requesting AddRef.jsp on
+        www.mysoccerleague.com drops that session; the site then answers 500.
+        """
+        home = getattr(self._loginResponse, 'url', '') or self._baseUrl
+        home_parts = urlparse(home)
+        for link in self._loginResponse.soup.find_all('a'):
+            href = link.get('href') or ''
+            if 'AddRef.jsp' not in href:
+                continue
+            joined = urlparse(urljoin(home, href))
+            roster = urlunparse(joined._replace(scheme=home_parts.scheme, netloc=home_parts.netloc))
+            if 'showAll=' not in roster:
+                roster += '&showAll=true' if '?' in roster else '?showAll=true'
+            return roster
+        origin = f"{urlparse(home).scheme}://{urlparse(home).netloc}"
+        return (
+            f"{origin}/AddRef.jsp?YSLkey={self._loginKey}"
+            "&actionName=Referees&showAll=true"
+        )
+
     def getAllReferees(self) -> list:
-        emails = None
-        retVal = None
-        for _ in range(3):
+        url = self._referee_roster_url()
+        logger.info("[_getAllReferees] Opening referee roster")
+        page = self._browser.open(url)
+        title = page.soup.title.string if page.soup.title and page.soup.title.string else ''
+        if '500' in title or 'Internal Server Error' in title:
+            raise RuntimeError(f'Referee roster page returned {title} ({page.url})')
+        if 'Guest Home' in title:
+            raise RuntimeError(f'Referee roster opened the guest home page ({page.url})')
+
+        entries = page.soup.find_all("tr", { "class" : 'trstyle1' })
+        entries += page.soup.find_all("tr", { "class" : 'trstyle2' })
+        if not entries:
+            raise RuntimeError(f'Referee roster page had no rows ({page.url})')
+
+        retVal = []
+        emails = []
+        for entry in entries:
+            elements = entry.find_all('td')
+            refereeFullName = elements[4].text
+            if refereeFullName.startswith("Marco"):
+                refereeFullName = "Marco Tulio Montanes"
+            emails.append(elements[7].text)
             try:
-                url = 'https://www.mysoccerleague.com/AddRef.jsp?YSLkey={0}&actionName=Referees&showAll=true'.format(self._loginKey)
-                page = self._browser.open(url)
+                firstName, lastName = split_referee_name(refereeFullName)
+            except ValueError as ex:
+                logger.warning('Skipping unparseable referee name %r: %s', refereeFullName, ex)
+                continue
+            retVal.append((firstName, lastName))
 
-                entries1 = page.soup.find_all("tr", { "class" : 'trstyle1' })
-                entries2 = page.soup.find_all("tr", { "class" : 'trstyle2' })
-
-                entries = entries1 + entries2
-
-                retVal = []
-                emails = []
-                for entry in entries:
-                    elements = entry.find_all('td')
-                    refereeFullName = elements[4].text
-                    if refereeFullName.startswith("Marco"):
-                        refereeFullName = "Marco Tulio Montanes"
-                    emails.append(elements[7].text)
-                    try:
-                        firstName, lastName = split_referee_name(refereeFullName)
-                    except ValueError as ex:
-                        logger.warning('Skipping unparseable referee name %r: %s', refereeFullName, ex)
-                        continue
-                    retVal.append((firstName, lastName))
-
-
-            except Exception:
-                time.sleep(3)
-            else:
-                break
+        if not retVal:
+            raise RuntimeError('Referee roster page returned no names')
         self.emails = emails
+        logger.info("[_getAllReferees] Parsed %s referees", len(retVal))
         return retVal
 
 
@@ -529,12 +577,11 @@ class MySoccerLeague(RefereeWebSite):
 
 
 def main():
-    import mechanicalsoup
-    br = mechanicalsoup.StatefulBrowser(soup_config={ 'features': 'lxml'})
-    br.addheaders = [('User-agent', 'Chrome')]
-    site = MySoccerLeague(br)
-
-    site.getAllReferees()
+    site = MySoccerLeague()
+    try:
+        site.getAllReferees()
+    finally:
+        site.close()
     print('end of program')
 
 if __name__ == "__main__":

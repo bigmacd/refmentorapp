@@ -9,6 +9,9 @@ beautifulsoup4==4.11.1
 certifi==2026.2.25
 lxml==6.0.2
 MechanicalSoup==1.2.0
+# Playwright (1.62.0) is installed in the local venv for the MySoccerLeague
+# browser. It is intentionally not listed here: the Fly image is Alpine, and
+# Playwright does not publish a musllinux wheel.
 psycopg==3.2.13
 psycopg-binary==3.2.13
 password-validator==1.0

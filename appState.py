@@ -26,6 +26,8 @@ class AppState:
         self.workload_output = None
         self.workload_error = None
         self.workload_loading = False
+        self.workload_revision = None
+        self.match_revision = None
         self._workload_lock = threading.Lock()
 
     def _data_org_id(self, organization_id=None) -> int:
@@ -36,15 +38,32 @@ class AppState:
             return org_id
         return resolve_workload_organization_id(self.db)
 
+    def _cache_revision(self, organization_id: int) -> str | None:
+        """meta.json updated_at. Changes on every cache write, including an upload."""
+        meta = load_meta(organization_id) or {}
+        return meta.get('updated_at')
+
+    def workload_needs_load(self, organization_id=None) -> bool:
+        org_id = self._data_org_id(organization_id)
+        cached_org_id = getattr(self.ui, 'resultsFromRunOrgId', None)
+        return (
+            cached_org_id != org_id
+            or not hasattr(self.ui, 'resultsFromRun')
+            or self.ui.resultsFromRun is None
+            or self.workload_revision != self._cache_revision(org_id)
+        )
+
     def load_data(self, force_reload=False, organization_id=None):
         """Load season match schedule for the given or current organization (from cache)."""
         org_id = self._data_org_id(organization_id)
+        revision = self._cache_revision(org_id)
 
         with self._load_lock:
             should_load = (
                 force_reload
                 or self.all_match_data is None
                 or self.match_data_org_id != org_id
+                or self.match_revision != revision
             )
             if should_load and not self._loading:
                 self._loading = True
@@ -53,6 +72,7 @@ class AppState:
                     self.all_match_data = getAllData(organization_id=org_id, force_refresh=force_reload)
                     self.dates = list(self.all_match_data.keys()) if self.all_match_data else []
                     self.match_data_org_id = org_id
+                    self.match_revision = revision
                     self.loaded = True
                     self.logger.info(
                         "Successfully loaded %s dates for organization_id=%s",
@@ -81,15 +101,10 @@ class AppState:
     def load_workload_data(self, force_reload=False, organization_id=None):
         """Load workload data for the given or current organization (from cache)."""
         org_id = self._data_org_id(organization_id)
-        cached_org_id = getattr(self.ui, 'resultsFromRunOrgId', None)
+        revision = self._cache_revision(org_id)
 
         with self._workload_lock:
-            should_load = (
-                force_reload
-                or cached_org_id != org_id
-                or not hasattr(self.ui, 'resultsFromRun')
-                or self.ui.resultsFromRun is None
-            )
+            should_load = force_reload or self.workload_needs_load(org_id)
             if should_load and not self.workload_loading:
                 self.workload_loading = True
                 try:
@@ -101,6 +116,7 @@ class AppState:
                     if not self.workload_output:
                         self.workload_output = 'No workload data available'
                     self.workload_error = None
+                    self.workload_revision = revision
                     self.logger.info("Successfully loaded workload data for organization_id=%s", org_id)
                 except Exception as e:
                     self.logger.error(f"Failed to load workload data: {e}", exc_info=True)

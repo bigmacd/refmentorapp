@@ -1222,12 +1222,7 @@ def render_workload_tab():
             else:
                 ui.timer(0.5, check_workload_status, once=True)
 
-        cached_org = getattr(ui, 'resultsFromRunOrgId', None)
-        needs_load = (
-            cached_org != org_id
-            or not hasattr(ui, 'resultsFromRun')
-            or ui.resultsFromRun is None
-        )
+        needs_load = state.workload_needs_load(org_id)
 
         if not state.workload_loading:
             if state.workload_error and not needs_load:

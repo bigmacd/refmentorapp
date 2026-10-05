@@ -1,16 +1,16 @@
 from collections import Counter
 import os
-import mechanicalsoup
 
 from refWebSites import MySoccerLeague
 
 
 def retrieveEmails():
-    br = mechanicalsoup.StatefulBrowser(soup_config={ 'features': 'lxml'})
-    br.addheaders = [('User-agent', 'Chrome')]
-    site = MySoccerLeague(br)
-    _ = site.getAllReferees()
-    return site.emails
+    site = MySoccerLeague()
+    try:
+        _ = site.getAllReferees()
+        return site.emails
+    finally:
+        site.close()
 
 
 def main():

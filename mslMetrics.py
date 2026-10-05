@@ -1,6 +1,3 @@
-import os
-import mechanicalsoup
-import time
 import logging
 
 from database import RefereeDbCockroach
@@ -10,10 +7,11 @@ logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     try:
-        br = mechanicalsoup.StatefulBrowser(soup_config={ 'features': 'lxml'})
-        br.addheaders = [('User-agent', 'Chrome')]
-        site = MySoccerLeague(br)
-        metrics = site.getReportForSeason('2025-04-01', '2025-12-31')
+        site = MySoccerLeague()
+        try:
+            metrics = site.getReportForSeason('2025-04-01', '2025-12-31')
+        finally:
+            site.close()
     except RuntimeError as e:
         logger.error(f"Failed to connect to MySoccerLeague: {e}")
         print(f"ERROR: {e}")

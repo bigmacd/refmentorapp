@@ -188,8 +188,9 @@ class WorkloadGenerator:
             self._generating: set[int] = set()
             self._initialized = True
 
-    def _generate_workload_data(self, organization_id: int) -> tuple[str, dict]:
+    def _generate_workload_data(self, organization_id: int, provider=None) -> tuple[str, dict]:
         stdout_capture = StringIO()
+        owns_provider = provider is None
 
         with redirect_stdout(stdout_capture):
             db = RefereeDbCockroach()
@@ -203,7 +204,8 @@ class WorkloadGenerator:
                 f"(id={organization_id}, provider={config.provider})"
             )
 
-            provider = get_assignment_provider(config)
+            if provider is None:
+                provider = get_assignment_provider(config)
             if provider is None:
                 print(
                     f"No assignment provider is configured for {org['name']}. "
@@ -211,27 +213,33 @@ class WorkloadGenerator:
                 )
                 return stdout_capture.getvalue(), {}
 
-            sync_new_referees(db, config)
+            try:
+                sync_new_referees(db, config)
 
-            all_refs_from_site = provider.get_all_referees()
+                all_refs_from_site = provider.get_all_referees()
 
-            new_refs = db.getNewReferees(organization_id)
-            for ref in new_refs:
-                if ref not in all_refs_from_site:
-                    print(f'Referee: {ref[0]} {ref[1]} not on assignment platform, check name spelling')
+                new_refs = db.getNewReferees(organization_id)
+                for ref in new_refs:
+                    if ref not in all_refs_from_site:
+                        print(f'Referee: {ref[0]} {ref[1]} not on assignment platform, check name spelling')
 
-            current = provider.get_current_assignments()
-            db.addGameDetails(current, organization_id)
+                current = provider.get_current_assignments()
+                db.addGameDetails(current, organization_id)
 
-            mentored = getRefsAlreadyMentored(organization_id)
-            risky = getRiskyRefs(organization_id)
-            new_refs = adjustDbNewRefs(new_refs)
+                mentored = getRefsAlreadyMentored(organization_id)
+                risky = getRiskyRefs(organization_id)
+                new_refs = adjustDbNewRefs(new_refs)
 
-            results_from_run = generateWorkload(current, new_refs, mentored, risky)
+                results_from_run = generateWorkload(current, new_refs, mentored, risky)
+            finally:
+                if owns_provider:
+                    closer = getattr(provider, 'close', None)
+                    if closer is not None:
+                        closer()
 
         return stdout_capture.getvalue(), results_from_run
 
-    def generate_and_persist(self, organization_id: int) -> tuple[str, dict]:
+    def generate_and_persist(self, organization_id: int, provider=None) -> tuple[str, dict]:
         """Run a live workload generation (used by sync_worker). Does not use filesystem cache."""
         if organization_id in self._generating:
             raise RuntimeError(f'Workload generation already in progress for org {organization_id}')
@@ -239,7 +247,7 @@ class WorkloadGenerator:
         self._generating.add(organization_id)
         try:
             logger.info('Generating workload data for organization_id=%s', organization_id)
-            output, results = self._generate_workload_data(organization_id)
+            output, results = self._generate_workload_data(organization_id, provider=provider)
             self._cache[organization_id] = (output, results)
             return output, results
         finally:

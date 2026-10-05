@@ -28,7 +28,11 @@ def list_organization_ids(db: Optional[RefereeDbCockroach] = None) -> list[int]:
     return [org['id'] for org in db.getOrganizations()]
 
 
-def sync_match_schedule(organization_id: int, db: Optional[RefereeDbCockroach] = None) -> dict:
+def sync_match_schedule(
+    organization_id: int,
+    db: Optional[RefereeDbCockroach] = None,
+    provider=None,
+) -> dict:
     """Fetch season match schedule from the org's provider and write to disk."""
     db = db or RefereeDbCockroach()
     org = db.getOrganizationById(organization_id)
@@ -36,7 +40,9 @@ def sync_match_schedule(organization_id: int, db: Optional[RefereeDbCockroach] =
         raise ValueError(f'Organization id {organization_id} not found')
 
     config = get_workload_config(org)
-    provider = get_assignment_provider(config)
+    owns_provider = provider is None
+    if provider is None:
+        provider = get_assignment_provider(config)
     save_meta(
         organization_id,
         organization_name=org.get('name'),
@@ -58,7 +64,13 @@ def sync_match_schedule(organization_id: int, db: Optional[RefereeDbCockroach] =
         org.get('name'),
         config.provider,
     )
-    data = provider.get_season_match_schedule()
+    try:
+        data = provider.get_season_match_schedule()
+    finally:
+        if owns_provider:
+            closer = getattr(provider, 'close', None)
+            if closer is not None:
+                closer()
     save_match_schedule(organization_id, data)
     logger.info(
         'Saved match schedule for org %s: %s dates',
@@ -68,11 +80,11 @@ def sync_match_schedule(organization_id: int, db: Optional[RefereeDbCockroach] =
     return data
 
 
-def sync_workload(organization_id: int) -> tuple[str, dict]:
+def sync_workload(organization_id: int, provider=None) -> tuple[str, dict]:
     """Generate workload (includes live assignment scrape + DB updates) and write to disk."""
     logger.info('Syncing workload for organization_id=%s', organization_id)
     generator = WorkloadGenerator()
-    output, results = generator.generate_and_persist(organization_id)
+    output, results = generator.generate_and_persist(organization_id, provider=provider)
     save_workload(organization_id, output, results)
     logger.info('Saved workload for organization_id=%s', organization_id)
     return output, results
@@ -90,27 +102,32 @@ def sync_organization(organization_id: int, db: Optional[RefereeDbCockroach] = N
 
     logger.info('Starting sync for org %s (%s)', organization_id, org.get('name'))
     errors: list[str] = []
+    config = get_workload_config(org)
+    provider = get_assignment_provider(config)
 
     try:
-        sync_match_schedule(organization_id, db=db)
-    except Exception as exc:
-        msg = f'match schedule: {exc}'
-        logger.error('Sync failed for org %s — %s', organization_id, msg, exc_info=True)
-        record_sync_error(organization_id, match_error=str(exc))
-        errors.append(msg)
-
-    config = get_workload_config(org)
-    if get_assignment_provider(config) is None:
-        logger.info('Skipping workload sync for org %s (no provider)', organization_id)
-        save_workload(organization_id, '', {})
-    else:
         try:
-            sync_workload(organization_id)
+            sync_match_schedule(organization_id, db=db, provider=provider)
         except Exception as exc:
-            msg = f'workload: {exc}'
+            msg = f'match schedule: {exc}'
             logger.error('Sync failed for org %s — %s', organization_id, msg, exc_info=True)
-            record_sync_error(organization_id, workload_error=str(exc))
+            record_sync_error(organization_id, match_error=str(exc))
             errors.append(msg)
+
+        if provider is None:
+            logger.info('Skipping workload sync for org %s (no provider)', organization_id)
+            save_workload(organization_id, '', {})
+        else:
+            try:
+                sync_workload(organization_id, provider=provider)
+            except Exception as exc:
+                msg = f'workload: {exc}'
+                logger.error('Sync failed for org %s — %s', organization_id, msg, exc_info=True)
+                record_sync_error(organization_id, workload_error=str(exc))
+                errors.append(msg)
+    finally:
+        if provider is not None:
+            provider.close()
 
     meta = save_meta(
         organization_id,
