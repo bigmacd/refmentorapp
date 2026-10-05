@@ -20,7 +20,7 @@ primary_region = 'iad'
   APP_BASE_URL = 'https://refmentoring.us'
 
 [processes]
-  app = "sh -c 'python3 sync_worker.py & exec python3 newMain.py'"
+  app = "python3 newMain.py"
 
 [http_service]
   internal_port = 443
