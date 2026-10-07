@@ -1,4 +1,27 @@
+__pycache__/
+
 .venv/
 .venv-repin/
 .git
 
+.data/cache/
+.data/msl-browser-profile/
+./data/msl-edge.log
+.data/.DS_Store
+
+.nicegui/
+.pytest_cache/
+
+.vscode/
+.gitignore
+.dockerignore
+.safety-projoect.ini
+
+full-ca-bundle.pem
+
+TEST_README.md
+todo.txt
+
+
+tests/
+tools/
