@@ -10,6 +10,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from report_sessions import MentoringSessionRow, rows_from_db_tuples, text_from_session_rows
 
 
+_SQL_IDENTIFIER_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+
+
 def _parse_user_settings(value: Any) -> dict:
     if isinstance(value, dict):
         return dict(value)
@@ -20,6 +23,17 @@ def _parse_user_settings(value: Any) -> dict:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def sql_identifier(name: str) -> str:
+    """Allow only a plain SQL identifier before interpolating into DDL.
+
+    Table and constraint names cannot be bound as query parameters, so callers
+    must validate them. User-supplied values must never be passed here.
+    """
+    if not _SQL_IDENTIFIER_RE.fullmatch(name or ''):
+        raise ValueError(f'Invalid SQL identifier: {name!r}')
+    return name
 
 
 class RefereeDbCockroach(object):
@@ -170,6 +184,7 @@ class RefereeDbCockroach(object):
 
     def _addOrganizationIdColumn(self, table_name: str, default_org_id: int) -> None:
         """Add organization_id to an existing table, backfill, and set NOT NULL."""
+        table_name = sql_identifier(table_name)
         if not self._tableExists(table_name):
             return
         if self._columnExists(table_name, 'organization_id'):
@@ -192,10 +207,11 @@ class RefereeDbCockroach(object):
         )
         self.executeSql(f"ALTER TABLE {table_name} ALTER COLUMN organization_id SET NOT NULL")
         try:
+            constraint_name = sql_identifier(f'{table_name}_organization_id_fkey')
             self.executeSql(
                 f"""
                 ALTER TABLE {table_name}
-                ADD CONSTRAINT {table_name}_organization_id_fkey
+                ADD CONSTRAINT {constraint_name}
                 FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
                 """
             )
@@ -371,8 +387,9 @@ class RefereeDbCockroach(object):
         )
         for (constraint_name,) in self.cursor.fetchall():
             logging.info("Dropping FK constraint %s on mentor_game_selections", constraint_name)
+            ident = sql_identifier(constraint_name)
             self.executeSql(
-                f'ALTER TABLE mentor_game_selections DROP CONSTRAINT IF EXISTS "{constraint_name}"'
+                f'ALTER TABLE mentor_game_selections DROP CONSTRAINT IF EXISTS {ident}'
             )
 
         # Remap any legacy mentors.id values to matching users by name
@@ -925,19 +942,6 @@ class RefereeDbCockroach(object):
         return "LOWER(me.first_name) = %s AND LOWER(me.last_name) = %s"
 
 
-    # def getMentoringSessions(self) -> dict:
-
-    #     range = self._getSeasonRange()
-
-    #     retVal = {}
-    #     sql = f"select distinct r.lastname, r.firstname, ms.position, ms.date from mentor_sessions ms join referees r on ms.mentee = r.id where ms.date between '{range[0]}' and '{range[1]}'"
-    #     r = self.executeSql(sql)
-    #     rows = r.fetchall()
-    #     for row in rows:
-    #         retVal[f'{row[1]} {row[0]}'] = [ row[2], row[3]]
-    #     return retVal
-
-
     def getMentoringSessionMetrics(self, year: int, season: str, organization_id: int = None) -> dict:
         '''
         season is either 'fall' or 'spring'
@@ -947,10 +951,12 @@ class RefereeDbCockroach(object):
         def getRanges(season: str, year: int) -> list:
             if season == 'fall':
                 return [f'{year}-07-01', f'{year}-12-31']
-            else:
-                return [f'{year}-04-01', f'{year}-06-30']
+            if season != 'spring':
+                raise ValueError("season must be 'fall' or 'spring'")
+            return [f'{year}-04-01', f'{year}-06-30']
 
         org_id = self._resolve_organization_id(organization_id)
+        year = int(year)
         range = getRanges(season, year)
         sql = """
             SELECT
@@ -991,6 +997,7 @@ class RefereeDbCockroach(object):
     def getMentoringSessionDetails(self, year: int, organization_id: int = None) -> dict:
 
         org_id = self._resolve_organization_id(organization_id)
+        year = int(year)
         range = [f'{year}-01-01', f'{year}-12-31']
         sql = f"""select r.firstname, r.lastname, ms.position, ms.date, ms.comments,
               {self._mentor_name_select_sql()},
@@ -2008,5 +2015,24 @@ class RefereeDbCockroach(object):
         self.executeSql(sql, (game_date, venue, game_id, org_id))
         rows = self.cursor.fetchall()
         return [f"{row[0].capitalize()} {row[1].capitalize()}" for row in rows]
+
+
+def use_sqlite_backend() -> bool:
+    """True when this process should use RefereeDbSqlite instead of Cockroach."""
+    backend = (os.environ.get('DB_BACKEND') or '').strip().lower()
+    if backend in ('sqlite', 'sqlite3'):
+        return True
+    if backend in ('cockroach', 'cockroachdb', 'postgres', 'postgresql'):
+        return False
+    url = (os.environ.get('db_url') or os.environ.get('DATABASE_URL') or '').strip()
+    return url.startswith('sqlite:')
+
+
+def get_db():
+    """Return the active database implementation (Cockroach by default, SQLite for demo/local)."""
+    if use_sqlite_backend():
+        from database_sqlite import RefereeDbSqlite
+        return RefereeDbSqlite()
+    return RefereeDbCockroach()
 
 

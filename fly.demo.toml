@@ -1,0 +1,56 @@
+# Demo Fly.io config: SQLite + snapshot cache, no assignment scrape.
+# Deploy with: fly deploy -c fly.demo.toml --image-label demo-$(git rev-parse --short HEAD)
+#
+# One-time setup:
+#   fly apps create demo-refmentor
+#   fly volumes create data_cache --app demo-refmentor --region iad --size 1
+#   fly secrets set -a demo-refmentor STORAGE_SECRET=...
+#   # Optional, if password-reset email should work:
+#   # fly secrets set -a demo-refmentor EMAIL_USER=... EMAIL_TOKEN=...
+#
+# After the first deploy, unpack the demo snapshot onto the volume:
+#   sqlite3 .data/refmentor.sqlite "PRAGMA wal_checkpoint(FULL);"   # locally, before packing
+#   tar -czf demo-baseline.tar.gz -C .data refmentor.sqlite cache/org_2
+#   fly ssh sftp shell -a demo-refmentor
+#     put demo-baseline.tar.gz /data/demo-baseline.tar.gz
+#   fly ssh console -a demo-refmentor -C "tar -xzf /data/demo-baseline.tar.gz -C /data"
+#   fly machines restart -a demo-refmentor
+#
+# Reset to baseline: unpack the same archive over /data and restart.
+#
+# Do not set production db_url. Do not scale this app above 1 machine (SQLite + volume).
+
+app = 'demo-refmentor'
+primary_region = 'iad'
+
+[build]
+
+[env]
+  DB_BACKEND = 'sqlite'
+  SQLITE_PATH = '/data/refmentor.sqlite'
+  DATA_CACHE_DIR = '/data/cache'
+  ALLOW_LIVE_FETCH = 'false'
+  showmentored = 'true'
+  APP_BASE_URL = 'https://demo-refmentor.fly.dev'
+
+# UI only. Demo data is the snapshot on the volume; a sync worker would only add noise.
+[processes]
+  app = 'python3 newMain.py'
+
+[http_service]
+  internal_port = 443
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[mounts]]
+  source = 'data_cache'
+  destination = '/data'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  processes = ['app']

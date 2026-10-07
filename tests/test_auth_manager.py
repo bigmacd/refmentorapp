@@ -18,12 +18,12 @@ from auth_nicegui import AuthManager, RESET_REQUEST_SUCCESS_MESSAGE, build_passw
 class TestAuthManagerPasswordReset(unittest.TestCase):
     """Test cases for password reset token functionality in AuthManager"""
 
-    @patch('auth_nicegui.RefereeDbCockroach')
-    def setUp(self, mock_db_class):
+    @patch('auth_nicegui.get_db')
+    def setUp(self, mock_get_db):
         """Set up test fixtures"""
         # Mock the database class to avoid actual DB connection
         mock_db_instance = Mock()
-        mock_db_class.return_value = mock_db_instance
+        mock_get_db.return_value = mock_db_instance
         
         self.auth_manager = AuthManager()
         # The database is already mocked via the patch

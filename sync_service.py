@@ -12,25 +12,26 @@ from typing import Optional
 
 from assignment_providers import get_assignment_provider, get_workload_config
 from data_store import (
+    load_match_schedule,
     record_sync_error,
     save_match_schedule,
     save_meta,
     save_workload,
 )
-from database import RefereeDbCockroach
+from database import RefereeDbCockroach, get_db
 from generateWorkload import WorkloadGenerator
 
 logger = logging.getLogger(__name__)
 
 
 def list_organization_ids(db: Optional[RefereeDbCockroach] = None) -> list[int]:
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     return [org['id'] for org in db.getOrganizations()]
 
 
 def sync_match_schedule(organization_id: int, db: Optional[RefereeDbCockroach] = None) -> dict:
     """Fetch season match schedule from the org's provider and write to disk."""
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     org = db.getOrganizationById(organization_id)
     if not org:
         raise ValueError(f'Organization id {organization_id} not found')
@@ -45,12 +46,12 @@ def sync_match_schedule(organization_id: int, db: Optional[RefereeDbCockroach] =
 
     if provider is None:
         logger.info(
-            'No assignment provider for org %s (%s); writing empty match schedule',
+            'No assignment provider for org %s (%s, provider=%s); leaving existing match schedule cache in place',
             organization_id,
             org.get('name'),
+            config.provider,
         )
-        save_match_schedule(organization_id, {})
-        return {}
+        return load_match_schedule(organization_id) or {}
 
     logger.info(
         'Syncing match schedule for org %s (%s) via provider=%s',
@@ -83,7 +84,7 @@ def sync_organization(organization_id: int, db: Optional[RefereeDbCockroach] = N
     Full sync for one organization: match schedule then workload.
     Errors on one step are recorded in meta; the other step still runs.
     """
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     org = db.getOrganizationById(organization_id)
     if not org:
         raise ValueError(f'Organization id {organization_id} not found')
@@ -101,8 +102,11 @@ def sync_organization(organization_id: int, db: Optional[RefereeDbCockroach] = N
 
     config = get_workload_config(org)
     if get_assignment_provider(config) is None:
-        logger.info('Skipping workload sync for org %s (no provider)', organization_id)
-        save_workload(organization_id, '', {})
+        logger.info(
+            'Skipping workload sync for org %s (no live provider=%s); leaving existing cache in place',
+            organization_id,
+            config.provider,
+        )
     else:
         try:
             sync_workload(organization_id)
@@ -127,7 +131,7 @@ def sync_organization(organization_id: int, db: Optional[RefereeDbCockroach] = N
 
 def sync_all_organizations(db: Optional[RefereeDbCockroach] = None) -> list[dict]:
     """Sync every organization in the database."""
-    db = db or RefereeDbCockroach()
+    db = db or get_db()
     results = []
     for org_id in list_organization_ids(db):
         try:
