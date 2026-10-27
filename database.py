@@ -1218,7 +1218,7 @@ class RefereeDbCockroach(object):
         start = f'{year:04d}-01-01'
         end = f'{year + 1:04d}-01-01'
         sql = f"""
-            SELECT r.id, ms.position, ms.date, ms.gameid,
+            SELECT r.id, r.firstname, r.lastname, ms.position, ms.date, ms.gameid,
                    {self._mentor_name_select_sql()}
             FROM mentor_sessions ms
             JOIN referees r ON r.id = ms.mentee
@@ -1230,16 +1230,18 @@ class RefereeDbCockroach(object):
         rows = self.executeSql(sql, (org_id, start, end)).fetchall()
         sessions = []
         for row in rows:
-            when = session_date(row[2])
+            when = session_date(row[4])
             if when is None:
                 continue
             sessions.append(
                 SummarySession(
                     referee_id=int(row[0]),
-                    position=row[1] or '',
+                    position=row[3] or '',
                     when=when,
-                    mentor_name=mentor_display_name(row[5], row[4]),
-                    game_id=row[3],
+                    mentor_name=mentor_display_name(row[7], row[6]),
+                    game_id=row[5],
+                    referee_first=row[1] or '',
+                    referee_last=row[2] or '',
                 )
             )
         certified_rows = self.executeSql(

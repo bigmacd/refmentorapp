@@ -1,8 +1,8 @@
 """Year-end mentoring summary for a director of officials.
 
-The page is five blocks — reach, depth, spread, mentor load, and new
+The first page is five blocks — reach, depth, spread, mentor load, and new
 referees — plus a header that keeps reports, referees, and games separate.
-Name lists stay out of this version.
+The names behind the reach counts follow on the next page.
 """
 
 from __future__ import annotations
@@ -39,6 +39,8 @@ class SummarySession:
     when: date
     mentor_name: str
     game_id: Optional[str] = None
+    referee_first: str = ''
+    referee_last: str = ''
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,10 @@ class YearEndSummary:
     mentors: tuple[MentorLoad, ...]
     new_referees: int
     new_referees_mentored: int
+    ar_only_names: tuple[str, ...]
+    center_only_names: tuple[str, ...]
+    both_names: tuple[str, ...]
+    other_position_names: tuple[str, ...]
 
     @property
     def new_referees_not_mentored(self) -> int:
@@ -139,13 +145,19 @@ def build_year_end_summary(
     fall_start = date(year, 7, 1)
 
     in_year: list[tuple[int, str, date, str, str]] = []
+    referee_names: dict[int, tuple[str, str]] = {}
     for session in sessions:
         when = session_date(session.when)
         if when is None or not (start <= when < end):
             continue
+        referee_id = int(session.referee_id)
+        referee_names.setdefault(
+            referee_id,
+            ((session.referee_first or '').strip(), (session.referee_last or '').strip()),
+        )
         mentor = _display_mentor(session.mentor_name)
         game_id = (session.game_id or '').strip()
-        in_year.append((int(session.referee_id), session.position or '', when, mentor, game_id))
+        in_year.append((referee_id, session.position or '', when, mentor, game_id))
 
     by_referee: dict[int, list[tuple[str, date, str]]] = {}
     games: set[str] = set()
@@ -178,23 +190,32 @@ def build_year_end_summary(
         mentor_referees.setdefault(key, set()).add(referee_id)
 
     ar_only = center_only = both = other_position = 0
+    ar_only_names: list[tuple[tuple[str, str, str], str]] = []
+    center_only_names: list[tuple[tuple[str, str, str], str]] = []
+    both_names: list[tuple[tuple[str, str, str], str]] = []
+    other_position_names: list[tuple[tuple[str, str, str], str]] = []
     seen_once = seen_twice = seen_three_or_more = 0
     seen_by_multiple_mentors = 0
     within_seven_days = beyond_seven_days = 0
 
-    for entries in by_referee.values():
+    for referee_id, entries in by_referee.items():
         roles = {_position_role(position) for position, _, _ in entries}
         roles.discard('')
         has_ar = 'ar' in roles
         has_center = 'center' in roles
+        label = _referee_label(*referee_names.get(referee_id, ('', '')), referee_id)
         if has_ar and has_center:
             both += 1
+            both_names.append(label)
         elif has_ar:
             ar_only += 1
+            ar_only_names.append(label)
         elif has_center:
             center_only += 1
+            center_only_names.append(label)
         else:
             other_position += 1
+            other_position_names.append(label)
 
         count = len(entries)
         if count == 1:
@@ -254,6 +275,10 @@ def build_year_end_summary(
         mentors=mentors,
         new_referees=len(certified),
         new_referees_mentored=len(certified & mentored),
+        ar_only_names=_sorted_names(ar_only_names),
+        center_only_names=_sorted_names(center_only_names),
+        both_names=_sorted_names(both_names),
+        other_position_names=_sorted_names(other_position_names),
     )
 
 
@@ -301,9 +326,18 @@ def spread_lines(summary: YearEndSummary) -> list[str]:
             f'Fall: {_count_phrase(summary.fall_reports, "report")}, '
             f'{_count_phrase(summary.fall_referees, "referee")}'
         ),
-        'Referees with two or more sessions:',
-        f'All sessions within 7 days: {summary.within_seven_days}',
-        f'First and last session more than 7 days apart: {summary.beyond_seven_days}',
+        (
+            f'{_count_phrase(summary.seen_twice + summary.seen_three_or_more, "referee")} '
+            'with two or more sessions'
+        ),
+        (
+            f'{_count_phrase(summary.within_seven_days, "referee")} '
+            'with every session within 7 days'
+        ),
+        (
+            f'{_count_phrase(summary.beyond_seven_days, "referee")} '
+            'with a first and last session more than 7 days apart'
+        ),
     ]
 
 
@@ -359,8 +393,40 @@ def text_from_year_end_summary(summary: YearEndSummary) -> str:
         'Spread across the year\n' + '\n'.join(spread_lines(summary) + [''] + month_table_lines(summary)),
         'Who carried the load\n' + '\n'.join([load_lead(summary)] + mentor_table_lines(summary)),
         'New referees\n' + '\n'.join(new_referee_lines(summary)),
+        '\n'.join(reach_name_lines(summary)),
     ]
     return '\n\n'.join(blocks) + '\n'
+
+
+def reach_name_lines(summary: YearEndSummary) -> list[str]:
+    """Names behind the reach counts, in the same order as the boss's query."""
+    sections = [
+        ('AR only', summary.ar_only_names),
+        ('Center only', summary.center_only_names),
+        ('Both', summary.both_names),
+    ]
+    if summary.other_position_names:
+        sections.append(('Other position', summary.other_position_names))
+    lines = ['Reach names']
+    for title, names in sections:
+        lines.append(f'{title} ({len(names)})')
+        lines.extend(names or ['None'])
+        lines.append('')
+    return lines
+
+
+def _sorted_names(labels: list[tuple[tuple[str, str, str], str]]) -> tuple[str, ...]:
+    return tuple(name for _, name in sorted(labels, key=lambda item: item[0]))
+
+
+def _referee_label(first: str, last: str, referee_id: int) -> tuple[tuple[str, str, str], str]:
+    first_name = (first or '').strip()
+    last_name = (last or '').strip()
+    if first_name or last_name:
+        display = mentor_display_name(first_name, last_name)
+    else:
+        display = f'Referee {referee_id}'
+    return ((last_name.casefold(), first_name.casefold(), display.casefold()), display)
 
 
 def _display_mentor(name: Optional[str]) -> str:

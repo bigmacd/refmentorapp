@@ -128,7 +128,7 @@ def pdf_bytes_from_session_rows(
 
 
 def pdf_bytes_from_year_end_summary(summary: YearEndSummary) -> bytes:
-    """One-page year-end summary. A long mentor list continues on the next page."""
+    """Year-end summary. Reach names start on the page after the summary."""
     regular, bold = _require_fonts()
     pdf = MentoringReportPDF(
         running_title=f'Year-end summary {summary.year}',
@@ -154,6 +154,7 @@ def pdf_bytes_from_year_end_summary(summary: YearEndSummary) -> bytes:
     _write_summary_section(pdf, 'Who carried the load', [load_lead(summary)])
     _write_mentor_table(pdf, summary)
     _write_summary_section(pdf, 'New referees', new_referee_lines(summary))
+    _write_reach_names(pdf, summary)
     return bytes(pdf.output())
 
 
@@ -604,6 +605,98 @@ def _mentor_line(
             new_x=XPos.LMARGIN if last else XPos.RIGHT,
             new_y=YPos.NEXT if last else YPos.TOP,
         )
+
+
+def _write_reach_names(pdf: FPDF, summary: YearEndSummary) -> None:
+    """Names for the three reach groups, starting on a fresh page."""
+    pdf.add_page()
+    pdf.set_text_color(*_NAVY)
+    pdf.set_font('DejaVu', 'B', 16)
+    pdf.cell(0, 8, 'Reach', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font('DejaVu', '', 9)
+    pdf.set_text_color(*_MUTED)
+    pdf.cell(
+        0,
+        5,
+        f'Referees mentored in {summary.year}, by position',
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
+    pdf.ln(3)
+    columns = [
+        (f'AR only ({summary.ar_only})', summary.ar_only_names),
+        (f'Center only ({summary.center_only})', summary.center_only_names),
+        (f'Both ({summary.both})', summary.both_names),
+    ]
+    _write_name_columns(pdf, columns)
+    if summary.other_position_names:
+        pdf.ln(2)
+        _write_summary_section(
+            pdf,
+            f'Other position ({summary.other_position})',
+            list(summary.other_position_names),
+        )
+
+
+def _write_name_columns(pdf: FPDF, columns: list[tuple[str, tuple[str, ...]]]) -> None:
+    gutter = 4
+    count = len(columns)
+    width = (pdf.epw - gutter * (count - 1)) / count
+    row_height = 4.4
+    header_height = 7
+    names = [list(items) for _, items in columns]
+    titles = [title for title, _ in columns]
+    cursors = [0] * count
+    while True:
+        y, rows = _name_column_room(pdf, header_height, row_height)
+        shown = []
+        for index in range(count):
+            x = pdf.l_margin + index * (width + gutter)
+            _name_column_header(pdf, x, y, width, titles[index])
+            if not names[index] and cursors[index] == 0:
+                _name_cell(pdf, x, y + header_height, width, 'None', muted=True)
+                shown.append(1)
+                continue
+            chunk = names[index][cursors[index]:cursors[index] + rows]
+            for row, name in enumerate(chunk):
+                _name_cell(pdf, x, y + header_height + row * row_height, width, name, muted=False)
+            cursors[index] += len(chunk)
+            shown.append(len(chunk))
+        pdf.set_y(y + header_height + row_height * max(shown) + 2)
+        if all(cursors[index] >= len(names[index]) for index in range(count)):
+            return
+        pdf.add_page()
+
+
+def _name_column_room(pdf: FPDF, header_height: float, row_height: float) -> tuple[float, int]:
+    y = pdf.get_y()
+    bottom = getattr(pdf, 'page_break_trigger', pdf.h - pdf.b_margin)
+    rows = int((bottom - y - header_height - 2) // row_height)
+    if rows >= 1:
+        return y, rows
+    pdf.add_page()
+    y = pdf.get_y()
+    bottom = getattr(pdf, 'page_break_trigger', pdf.h - pdf.b_margin)
+    rows = max(int((bottom - y - header_height - 2) // row_height), 1)
+    return y, rows
+
+
+def _name_column_header(pdf: FPDF, x: float, y: float, width: float, title: str) -> None:
+    pdf.set_fill_color(*_BAND)
+    pdf.rect(x, y, width, 6.5, style='F')
+    pdf.set_fill_color(*_NAVY)
+    pdf.rect(x, y, 1.2, 6.5, style='F')
+    pdf.set_xy(x + 3, y + 1)
+    pdf.set_font('DejaVu', 'B', 9)
+    pdf.set_text_color(*_NAVY)
+    pdf.cell(width - 4, 4.4, _fit_text(pdf, title, width - 5), new_x=XPos.RIGHT, new_y=YPos.TOP)
+
+
+def _name_cell(pdf: FPDF, x: float, y: float, width: float, text: str, *, muted: bool) -> None:
+    pdf.set_xy(x + 1, y)
+    pdf.set_font('DejaVu', '', 9)
+    pdf.set_text_color(*(_MUTED if muted else _INK))
+    pdf.cell(width - 2, 4.4, _fit_text(pdf, text, width - 3), new_x=XPos.RIGHT, new_y=YPos.TOP)
 
 
 def _fit_text(pdf: FPDF, text: str, width: float) -> str:
