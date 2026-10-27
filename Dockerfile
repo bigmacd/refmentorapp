@@ -7,6 +7,7 @@ WORKDIR /app
 COPY requirements.txt /app/
 COPY VERSION /app/VERSION
 COPY *.py /app/
+COPY fonts /app/fonts
 COPY static /app/static
 COPY docs /app/docs
 COPY staging-root.crt /root/.postgresql/root.crt

@@ -19,6 +19,7 @@ from nicegui import ui, app
 from appState import AppState
 from calendar_tab import CalendarTab
 from excelWriter import excel_bytes_from_session_rows
+from pdfWriter import pdf_bytes_from_session_rows
 from mentor_game_selection import MentorGameSelection
 from auth_nicegui import APP_HOME, HELP_PATH, render_app_header
 from report_sessions import (
@@ -1044,13 +1045,13 @@ def build_report_download_filename(scope: str, value: str, extension: str) -> st
 
 
 def render_reports_tab():
-    """Render the reports generation tab: on-screen preview + CSV/Excel download."""
+    """Render the reports generation tab: on-screen preview plus CSV, Excel, and PDF."""
     org_id = current_org_id()
 
     with ui.card().classes('form-container w-full'):
         ui.label('Generate Reports').classes('text-xl font-bold mb-4')
         ui.label(
-            'Choose a report, generate a preview, then download CSV or Excel if needed.'
+            'Choose a report, generate a preview, then download PDF, CSV, or Excel if needed.'
         ).classes('text-sm text-gray-400 mb-4')
 
         year_data = state.db.getYears(org_id)
@@ -1128,6 +1129,7 @@ def render_reports_tab():
 
                 ui.label(f'{len(rows)} session(s)').classes('text-sm text-gray-400 mb-2')
                 with ui.row().classes('w-full gap-2 mb-4'):
+                    ui.button('Download PDF', on_click=download_pdf).props('color=primary')
                     ui.button('Download CSV', on_click=download_csv).props('color=primary')
                     ui.button('Download Excel', on_click=download_excel).props('color=primary')
 
@@ -1171,6 +1173,23 @@ def render_reports_tab():
             except Exception as e:
                 logger.exception('Error generating report')
                 ui.notify(f'Error generating report: {str(e)}', type='negative')
+
+        def download_pdf():
+            rows = report_state['rows']
+            if not rows:
+                ui.notify('Generate a report first', type='warning')
+                return
+            filename = build_report_download_filename(
+                report_state['scope'], report_state['value'], 'pdf'
+            )
+            ui.download(
+                pdf_bytes_from_session_rows(
+                    rows,
+                    scope=report_state['scope'],
+                    selection=str(report_state['value']),
+                ),
+                filename,
+            )
 
         def download_csv():
             rows = report_state['rows']

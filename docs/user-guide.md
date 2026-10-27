@@ -90,7 +90,7 @@ You need a game, a mentor, and at least one referee checked. Each checked refere
 2. Choose **Report Type**: `by year`, `by week`, `by referee`, or `by mentor`.
 3. Fill in the matching selector (**Select Year**, **Select Week**, **Select Referee**, or **Select Mentor**).
 4. Tap **Generate Report**.
-5. Read the on-screen **Preview**, or tap **Download CSV** / **Download Excel**.
+5. Read the on-screen **Preview**, or tap **Download PDF**, **Download CSV**, or **Download Excel**. PDF is the printable narrative. CSV and Excel are the spreadsheet exports.
 
 If nothing matches, you will see **No mentoring sessions found for this selection.**
 

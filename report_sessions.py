@@ -2,7 +2,7 @@
 Structured mentoring-session rows for reports.
 
 DB queries return tuples; convert once to MentoringSessionRow, then render
-text / CSV / Excel from those rows instead of parsing report text.
+text / CSV / Excel / PDF from those rows instead of parsing report text.
 """
 
 from __future__ import annotations
