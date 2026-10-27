@@ -90,6 +90,64 @@ class TestRefereeDbSqlite(unittest.TestCase):
         metrics = self.db.getMentoringSessionMetrics(2026, 'spring', org_id)
         self.assertEqual(metrics['reports'], 1)
 
+    def test_year_end_summary_for_org(self):
+        org_id = self.db.getDefaultOrganizationId()
+        self.db.createUser('mentor1', 'h', 's', 'm@example.com', 'user', 'Pat', 'Mentor')
+        user = self.db.getUserByUsername('mentor1')
+        self.db.addUserToOrganization(user['id'], org_id)
+        self.db.createUser('mentor2', 'h', 's', 'm2@example.com', 'user', 'Rae', 'Coach')
+        coach = self.db.getUserByUsername('mentor2')
+        self.db.addUserToOrganization(coach['id'], org_id)
+        self.db.addReferee('smith', 'alex', 2026, org_id)
+        self.db.addReferee('lee', 'sam', 2026, org_id)
+        self.db.addReferee('kim', 'jordan', 2025, org_id)
+        ok, message = self.db.addMentorSession(
+            'Pat Mentor',
+            'Alex Smith',
+            'Center',
+            'Saturday, May 16, 2026',
+            'Good positioning',
+            'G1',
+            org_id,
+        )
+        self.assertTrue(ok, message)
+        ok, message = self.db.addMentorSession(
+            'Rae Coach',
+            'Alex Smith',
+            'AR1',
+            'Saturday, September 5, 2026',
+            'Watched the offside line',
+            'G2',
+            org_id,
+        )
+        self.assertTrue(ok, message)
+
+        summary = self.db.getYearEndSummary(2026, org_id)
+        self.assertEqual(summary.reports, 2)
+        self.assertEqual(summary.referees, 1)
+        self.assertEqual(summary.games, 2)
+        self.assertEqual(summary.both, 1)
+        self.assertEqual(summary.ar_only, 0)
+        self.assertEqual(summary.center_only, 0)
+        self.assertEqual(summary.seen_twice, 1)
+        self.assertEqual(summary.seen_by_multiple_mentors, 1)
+        self.assertEqual(summary.beyond_seven_days, 1)
+        self.assertEqual(summary.spring_reports, 1)
+        self.assertEqual(summary.spring_referees, 1)
+        self.assertEqual(summary.fall_reports, 1)
+        self.assertEqual(summary.fall_referees, 1)
+        self.assertEqual(summary.months[4].reports, 1)
+        self.assertEqual(summary.months[8].reports, 1)
+        self.assertEqual(summary.new_referees, 2)
+        self.assertEqual(summary.new_referees_mentored, 1)
+        self.assertEqual(summary.new_referees_not_mentored, 1)
+        self.assertEqual(
+            [(mentor.name, mentor.reports, mentor.referees) for mentor in summary.mentors],
+            [('Pat Mentor', 1, 1), ('Rae Coach', 1, 1)],
+        )
+        with self.assertRaises(ValueError):
+            self.db.getYearEndSummary('2026 OR 1=1 --', org_id)
+
     def test_calendar_event_times(self):
         ok, message, event_id = self.db.addCalendarEvent(
             'Clinic', 'Notes', '2026-03-14', '2026-03-14', '09:00', '11:00', 'demo'

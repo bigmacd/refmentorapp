@@ -19,7 +19,8 @@ from nicegui import ui, app
 from appState import AppState
 from calendar_tab import CalendarTab
 from excelWriter import excel_bytes_from_session_rows
-from pdfWriter import pdf_bytes_from_session_rows
+from pdfWriter import pdf_bytes_from_session_rows, pdf_bytes_from_year_end_summary
+from year_end_summary import text_from_year_end_summary
 from mentor_game_selection import MentorGameSelection
 from auth_nicegui import APP_HOME, HELP_PATH, render_app_header
 from report_sessions import (
@@ -1051,14 +1052,16 @@ def render_reports_tab():
     with ui.card().classes('form-container w-full'):
         ui.label('Generate Reports').classes('text-xl font-bold mb-4')
         ui.label(
-            'Choose a report, generate a preview, then download PDF, CSV, or Excel if needed.'
+            'Choose a report, generate a preview, then download it. '
+            'Year-end summary is a one-page statistics PDF. '
+            'The other reports download as PDF, CSV, or Excel.'
         ).classes('text-sm text-gray-400 mb-4')
 
         year_data = state.db.getYears(org_id)
         year_data.insert(0, ' ')
 
         report_type = ui.select(
-            ['by year', 'by week', 'by referee', 'by mentor'],
+            ['by year', 'year-end summary', 'by week', 'by referee', 'by mentor'],
             label='Report Type',
             value='by year'
         ).classes('w-full')
@@ -1068,18 +1071,23 @@ def render_reports_tab():
         result_area = ui.column().classes('w-full mt-4')
 
         current_selection = {'type': None, 'value': None}
-        report_state = {'rows': None, 'scope': None, 'value': None}
+        report_state = {'rows': None, 'scope': None, 'value': None, 'summary': None}
 
         def update_selection():
             selection_container.clear()
             action_area.clear()
             result_area.clear()
             report_state['rows'] = None
+            report_state['summary'] = None
 
             with selection_container:
                 if report_type.value == 'by year':
                     sel = ui.select(year_data, label='Select Year').classes('w-full')
                     sel.on_value_change(lambda: set_selection('year', sel.value))
+
+                elif report_type.value == 'year-end summary':
+                    sel = ui.select(year_data, label='Select Year').classes('w-full')
+                    sel.on_value_change(lambda: set_selection('year-end', sel.value))
 
                 elif report_type.value == 'by week':
                     weeks = [' '] + state.dates
@@ -1110,6 +1118,7 @@ def render_reports_tab():
             action_area.clear()
             result_area.clear()
             report_state['rows'] = None
+            report_state['summary'] = None
 
             if not current_selection['value'] or current_selection['value'] == ' ':
                 return
@@ -1119,6 +1128,9 @@ def render_reports_tab():
 
         def show_results():
             result_area.clear()
+            if report_state['scope'] == 'year-end':
+                show_year_end_summary()
+                return
             rows = report_state['rows'] or []
             with result_area:
                 if not rows:
@@ -1141,6 +1153,20 @@ def render_reports_tab():
                     'max-height: 28rem; overflow-y: auto;'
                 )
 
+        def show_year_end_summary():
+            summary = report_state['summary']
+            with result_area:
+                if summary is None:
+                    ui.label('Generate a summary first.').classes('text-gray-400')
+                    return
+                ui.button('Download PDF', on_click=download_pdf).props('color=primary').classes('mb-4')
+                ui.label('Preview').classes('text-lg font-semibold mb-2')
+                ui.textarea(value=text_from_year_end_summary(summary)).classes(
+                    'w-full font-mono text-sm'
+                ).props('readonly outlined autogrow input-class=whitespace-pre-wrap').style(
+                    'max-height: 28rem; overflow-y: auto;'
+                )
+
         def generate_report():
             sel_type = current_selection['type']
             sel_value = current_selection['value']
@@ -1150,6 +1176,15 @@ def render_reports_tab():
                 return
 
             try:
+                if sel_type == 'year-end':
+                    summary = state.db.getYearEndSummary(sel_value, org_id)
+                    report_state['summary'] = summary
+                    report_state['rows'] = None
+                    report_state['scope'] = sel_type
+                    report_state['value'] = sel_value
+                    show_results()
+                    ui.notify(f'Year-end summary for {sel_value} ready', type='positive')
+                    return
                 if sel_type == 'year':
                     rows = state.db.getYearReportRows(sel_value, org_id)
                 elif sel_type == 'week':
@@ -1175,13 +1210,20 @@ def render_reports_tab():
                 ui.notify(f'Error generating report: {str(e)}', type='negative')
 
         def download_pdf():
+            filename = build_report_download_filename(
+                report_state['scope'], report_state['value'], 'pdf'
+            )
+            if report_state['scope'] == 'year-end':
+                summary = report_state['summary']
+                if summary is None:
+                    ui.notify('Generate a report first', type='warning')
+                    return
+                ui.download(pdf_bytes_from_year_end_summary(summary), filename)
+                return
             rows = report_state['rows']
             if not rows:
                 ui.notify('Generate a report first', type='warning')
                 return
-            filename = build_report_download_filename(
-                report_state['scope'], report_state['value'], 'pdf'
-            )
             ui.download(
                 pdf_bytes_from_session_rows(
                     rows,

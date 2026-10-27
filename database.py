@@ -8,6 +8,13 @@ from typing import Tuple, Optional, Any, List
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from report_sessions import MentoringSessionRow, rows_from_db_tuples, text_from_session_rows
+from year_end_summary import (
+    SummarySession,
+    YearEndSummary,
+    build_year_end_summary,
+    mentor_display_name,
+    session_date,
+)
 
 
 _SQL_IDENTIFIER_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
@@ -1199,6 +1206,49 @@ class RefereeDbCockroach(object):
 
     def getYearReportRows(self, year, organization_id: int = None) -> List[MentoringSessionRow]:
         return self.sessions_to_rows(self.getMentoringSessionDetails(year, organization_id))
+
+    def getYearEndSummary(self, year, organization_id: int = None) -> YearEndSummary:
+        """Counts for the year-end summary page.
+
+        Spring is April–June and fall is July–December, the same windows as
+        getMentoringSessionMetrics. January–March stays in the monthly counts.
+        """
+        org_id = self._resolve_organization_id(organization_id)
+        year = int(year)
+        start = f'{year:04d}-01-01'
+        end = f'{year + 1:04d}-01-01'
+        sql = f"""
+            SELECT r.id, ms.position, ms.date, ms.gameid,
+                   {self._mentor_name_select_sql()}
+            FROM mentor_sessions ms
+            JOIN referees r ON r.id = ms.mentee
+            {self._mentor_join_sql()}
+            WHERE r.organization_id = %s
+              AND ms.date >= %s
+              AND ms.date < %s
+        """
+        rows = self.executeSql(sql, (org_id, start, end)).fetchall()
+        sessions = []
+        for row in rows:
+            when = session_date(row[2])
+            if when is None:
+                continue
+            sessions.append(
+                SummarySession(
+                    referee_id=int(row[0]),
+                    position=row[1] or '',
+                    when=when,
+                    mentor_name=mentor_display_name(row[5], row[4]),
+                    game_id=row[3],
+                )
+            )
+        certified_rows = self.executeSql(
+            """SELECT id FROM referees
+               WHERE organization_id = %s AND year_certified = %s""",
+            (org_id, year),
+        ).fetchall()
+        certified = [int(row[0]) for row in certified_rows]
+        return build_year_end_summary(year, sessions, certified)
 
     def getWeekReportRows(self, week, organization_id: int = None) -> List[MentoringSessionRow]:
         return self.sessions_to_rows(self.getMentoringsessionsForWeek(week, organization_id))
