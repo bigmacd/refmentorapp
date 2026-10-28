@@ -14,7 +14,7 @@ primary_region = 'iad'
   DATA_CACHE_DIR = '/data/cache'
   ALLOW_LIVE_FETCH = 'false'
   SYNC_INTERVAL_HOURS = '2'
-  showmentored = 'true'
+  showmentored = 'false'
   # Public origin used in password-reset emails (no trailing slash)
   APP_BASE_URL = 'https://refmentoring.us'
 
