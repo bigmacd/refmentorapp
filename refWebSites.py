@@ -236,7 +236,10 @@ class MySoccerLeague(RefereeWebSite):
 
 
     def getAllDatesForSeason(self) -> list:
-        url = "https://mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=allDates".format(self._loginKey)
+        url = (
+            f"{self._logged_in_origin()}/ViewRefAssignments.jsp"
+            f"?YSLkey={self._loginKey}&seasonId=0&leagueId=91&dateMode=allDates"
+        )
         logger.info(f"[getAllDatesForSeason] Opening URL for all dates")
 
         try:
@@ -281,7 +284,10 @@ class MySoccerLeague(RefereeWebSite):
             return match.group(0)
 
 
-        url_template = 'https://www.mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=allDates&date={1}'
+        url_template = (
+            f"{self._logged_in_origin()}/ViewRefAssignments.jsp"
+            "?YSLkey={0}&seasonId=0&leagueId=91&dateMode=allDates&date={1}"
+        )
 
         logger.info(f"[getMatches] Processing date: {dateInfo}")
         # convert from 'Day, Month Date, Year' i.e. (Saturday, September 24, 2022)
@@ -305,6 +311,7 @@ class MySoccerLeague(RefereeWebSite):
         try:
             start_time = time.time()
             page = self._browser.open(url)
+            self._require_signed_in_page(page, 'Match page')
             elapsed = time.time() - start_time
             logger.info(f"[getMatches] URL opened successfully in {elapsed:.2f}s for {dateInfo} (status: {page.status_code if hasattr(page, 'status_code') else 'N/A'})")
         except Exception as e:
@@ -384,24 +391,39 @@ class MySoccerLeague(RefereeWebSite):
 
                 # MSL url for current assignments
                 # need to extract the key fom the login_result first
-                url = "https://www.mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=futureDates&date={1}&startDate=9/8/21&endDate=11/19/21".format(self._loginKey, self._friday)
+                url = (
+                    f"{self._logged_in_origin()}/ViewRefAssignments.jsp"
+                    f"?YSLkey={self._loginKey}&seasonId=0&leagueId=91&dateMode=futureDates"
+                    f"&date={self._friday}&startDate=9/8/21&endDate=11/19/21"
+                )
                 assignments_page = self._browser.open(url)
+                self._require_signed_in_page(assignments_page, 'Assignment page')
                 rowtype1 = assignments_page.soup.find_all("tr", { "class" : 'trstyle1'})
                 rowtype2 = assignments_page.soup.find_all("tr", { "class" : 'trstyle2'})
                 assignments = rowtype1 + rowtype2
 
                 self._parseAssignments(assignments, results, self._friday)
 
-                url = "https://www.mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=futureDates&date={1}&startDate=9/8/21&endDate=11/19/21".format(self._loginKey, self._saturday)
+                url = (
+                    f"{self._logged_in_origin()}/ViewRefAssignments.jsp"
+                    f"?YSLkey={self._loginKey}&seasonId=0&leagueId=91&dateMode=futureDates"
+                    f"&date={self._saturday}&startDate=9/8/21&endDate=11/19/21"
+                )
                 assignments_page = self._browser.open(url)
+                self._require_signed_in_page(assignments_page, 'Assignment page')
                 rowtype1 = assignments_page.soup.find_all("tr", { "class" : 'trstyle1'})
                 rowtype2 = assignments_page.soup.find_all("tr", { "class" : 'trstyle2'})
                 assignments = rowtype1 + rowtype2
 
                 self._parseAssignments(assignments, results, self._saturday)
 
-                url = "https://www.mysoccerleague.com/ViewRefAssignments.jsp?YSLkey={0}&seasonId=0&leagueId=91&dateMode=futureDates&date={1}&startDate=9/8/21&endDate=11/19/21".format(self._loginKey, self._sunday)
+                url = (
+                    f"{self._logged_in_origin()}/ViewRefAssignments.jsp"
+                    f"?YSLkey={self._loginKey}&seasonId=0&leagueId=91&dateMode=futureDates"
+                    f"&date={self._sunday}&startDate=9/8/21&endDate=11/19/21"
+                )
                 assignments_page = self._browser.open(url)
+                self._require_signed_in_page(assignments_page, 'Assignment page')
                 rowtype1 = assignments_page.soup.find_all("tr", { "class" : 'trstyle1'})
                 rowtype2 = assignments_page.soup.find_all("tr", { "class" : 'trstyle2'})
                 assignments = rowtype1 + rowtype2
@@ -414,6 +436,23 @@ class MySoccerLeague(RefereeWebSite):
                 break
 
         return results
+
+    def _logged_in_origin(self) -> str:
+        """Scheme and host of the page login actually landed on.
+
+        The session cookie is for that host only. www.mysoccerleague.com is a
+        different host: assignment pages there are the guest home page and
+        have no games.
+        """
+        home = getattr(self._loginResponse, 'url', '') or self._baseUrl
+        home_parts = urlparse(home)
+        return f"{home_parts.scheme}://{home_parts.netloc}"
+
+    def _require_signed_in_page(self, page, what: str) -> None:
+        title = page.soup.title.string.strip() if page.soup.title and page.soup.title.string else ''
+        host = urlparse(page.url).netloc
+        if 'Guest Home' in title or '500' in title or 'Internal Server Error' in title:
+            raise RuntimeError(f'{what} opened {title!r} on {host}')
 
     def _referee_roster_url(self) -> str:
         """Roster URL on the same host as the logged-in home page.
@@ -476,7 +515,10 @@ class MySoccerLeague(RefereeWebSite):
 
 
     def getReportData(self, startDate: str, endDate: str):
-        url = f'https://mysoccerleague.com/GamesReportChoice.jsp?YSLkey={self._loginKey}&actionName=Game%20Reports'
+        url = (
+            f"{self._logged_in_origin()}/GamesReportChoice.jsp"
+            f"?YSLkey={self._loginKey}&actionName=Game%20Reports"
+        )
 
         # what is data and data2 for?
         data = f'YSLkey={self._loginKey}&returnJsp=ShowGameReports.jsp&dateMode=allDates&startDate=2023-11-17&endDate=2023-11-17&ageGroupFilter=all&genderFilter=all&classFilter=all&grSelect=1&grSelect=2&grSelect=3&filterButton=View+Reports'
