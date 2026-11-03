@@ -27,6 +27,7 @@ from avatars import (
     save_avatar,
 )
 from database import RefereeDbCockroach, get_db
+from database_sqlite import demo_mode
 from sendemail import SendMailSimple
 
 # Password validation schema
@@ -288,6 +289,8 @@ class AuthManager:
 
     def change_password(self, username: str, old_password: str, new_password: str) -> Tuple[bool, str]:
         """Change user's password"""
+        if _shared_demo_account(username):
+            return False, "The shared demo password stays demo."
         user = self.db.getUserByUsername(username)
         if not user:
             return False, "User not found"
@@ -316,7 +319,7 @@ class AuthManager:
         """
         user = self.db.getUserByEmail(email)
 
-        if not user:
+        if not user or _shared_demo_account(user['username']):
             return True, RESET_REQUEST_SUCCESS_MESSAGE
 
         try:
@@ -355,6 +358,8 @@ class AuthManager:
 
         if not token_data:
             return False, "Invalid or expired reset token"
+        if _shared_demo_account(token_data['username']):
+            return False, "The shared demo password stays demo."
 
         try:
             new_hash, new_salt = self.hash_password(new_password)
@@ -761,6 +766,37 @@ def help_page():
         ui.markdown(_load_help_markdown())
 
 
+def _shared_demo_account(username: Optional[str]) -> bool:
+    return demo_mode() and (username or '') == 'demo'
+
+
+@ui.page('/demo')
+def demo_entry(request: Request):
+    """Sign the visitor in as the shared demo account and open the app."""
+    if not demo_mode():
+        ui.navigate.to('/')
+        return
+
+    auth_manager = AuthManager()
+    if auth_manager.is_authenticated():
+        ui.navigate.to(APP_HOME)
+        return
+
+    user = auth_manager.db.getUserByUsername('demo')
+    org_id = None
+    if user:
+        org_ids = auth_manager.db.getOrganizationIdsForUser(user['id'])
+        org_id = org_ids[0] if org_ids else None
+    if user and auth_manager.authenticate_user('demo', 'demo', organization_id=org_id):
+        auth_manager.log_current_user(request)
+        logging.info("Shared demo login, navigating to %s", APP_HOME)
+        ui.navigate.to(APP_HOME)
+        return
+
+    logging.error("Shared demo login failed")
+    ui.navigate.to('/login')
+
+
 @ui.page('/login')
 def login_page():
     """Login page"""
@@ -1117,8 +1153,14 @@ def settings_page():
 
         with ui.card().classes('w-full p-4'):
             ui.label('Password').classes('text-lg font-semibold mb-1')
-            ui.label(PASSWORD_REQUIREMENTS).classes('text-sm text-gray-400 mb-4')
-            _render_change_password_form(auth_manager)
+            if _shared_demo_account(username):
+                ui.label(
+                    'This is the shared demo login. The password stays demo, and reports you add '
+                    'are cleared the next time the demo restarts.'
+                ).classes('text-sm text-gray-400')
+            else:
+                ui.label(PASSWORD_REQUIREMENTS).classes('text-sm text-gray-400 mb-4')
+                _render_change_password_form(auth_manager)
 
 
 @ui.page('/change-password')

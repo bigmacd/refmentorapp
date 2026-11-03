@@ -17,6 +17,8 @@ primary_region = 'iad'
   showmentored = 'false'
   # Public origin used in password-reset emails (no trailing slash)
   APP_BASE_URL = 'https://refmentoring.us'
+  # Homepage "Try the demo" button. The demo app signs that link in as demo/demo.
+  DEMO_PUBLIC_URL = 'https://demo.refmentoring.us/app'
 
 [processes]
   app = "python3 newMain.py"

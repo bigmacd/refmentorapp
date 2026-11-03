@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 from datetime import date, datetime, time as dt_time, timezone
 from pathlib import Path
@@ -21,6 +22,52 @@ from database import RefereeDbCockroach, sql_identifier
 logger = logging.getLogger(__name__)
 
 _NOW_UTC = "(NOW() AT TIME ZONE 'UTC')::TIMESTAMP"
+
+
+def demo_mode() -> bool:
+    """True on the public demo app, where visitors share the demo/demo login."""
+    return (os.environ.get('DEMO_MODE') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def restore_sqlite_baseline(baseline: Path, target: Path) -> None:
+    """Replace target with baseline and drop WAL/SHM sidecars so old writes are not replayed."""
+    baseline = Path(baseline)
+    target = Path(target)
+    if not baseline.is_file():
+        raise FileNotFoundError(baseline)
+    if baseline.resolve() == target.resolve():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    for sidecar_name in (f'{target.name}-wal', f'{target.name}-shm'):
+        sidecar = target.parent / sidecar_name
+        if sidecar.exists():
+            sidecar.unlink()
+    temporary = target.with_name(f'{target.name}.restore')
+    shutil.copyfile(baseline, temporary)
+    os.replace(temporary, target)
+
+
+def restore_demo_baseline_if_enabled() -> bool:
+    """On demo startup, put the packaged baseline back over the live SQLite file."""
+    if not demo_mode():
+        return False
+    baseline = Path(
+        os.environ.get('DEMO_BASELINE_PATH')
+        or (Path(__file__).resolve().parent / 'demo' / 'refmentor.sqlite')
+    )
+    target = Path(sqlite_db_path())
+    if not baseline.is_file():
+        logger.warning(
+            "Demo baseline not found at %s; leaving the live database in place",
+            baseline,
+        )
+        return False
+    if baseline.resolve() == target.resolve():
+        logger.info("Demo baseline and live database are the same file (%s)", target)
+        return False
+    restore_sqlite_baseline(baseline, target)
+    logger.info("Restored demo database from %s to %s", baseline, target)
+    return True
 
 
 def sqlite_db_path() -> str:

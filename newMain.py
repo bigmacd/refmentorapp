@@ -23,12 +23,17 @@ from pdfWriter import pdf_bytes_from_session_rows, pdf_bytes_from_year_end_summa
 from year_end_summary import text_from_year_end_summary
 from mentor_game_selection import MentorGameSelection
 from auth_nicegui import APP_HOME, HELP_PATH, render_app_header
+from database_sqlite import demo_mode, restore_demo_baseline_if_enabled
 from report_sessions import (
     csv_bytes_from_session_rows,
     preview_text_from_session_rows,
 )
 
 logger = logging.getLogger(__name__)
+
+# Before any connection opens the live file. A demo restart drops visitor reports
+# and puts demo/refmentor.sqlite back.
+restore_demo_baseline_if_enabled()
 
 state = AppState(logger, ui)
 
@@ -76,10 +81,19 @@ def current_org_id() -> int:
     return state.db.getDefaultOrganizationId()
 
 
+def public_demo_href() -> str:
+    """Off-demo sites can link to the shared demo. Empty when this process is the demo."""
+    if demo_mode():
+        return ''
+    return (os.environ.get('DEMO_PUBLIC_URL') or '').strip()
+
+
 def landing_primary_cta() -> tuple[str, str]:
-    """Landing page primary button: sign in, or open the app if already logged in."""
+    """Landing page primary button: sign in, try the shared demo, or open the app."""
     if state.auth_manager.is_authenticated():
         return APP_HOME, 'Open App'
+    if demo_mode():
+        return '/demo', 'Try the demo'
     return '/login', 'Sign In'
 
 
@@ -526,7 +540,10 @@ def render_landing_page():
                 ui.link('How it Works', '#how-it-works')
                 ui.link('Help', HELP_PATH)
                 ui.link('Contact', '#contact-us')
-            ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
+            with ui.row().classes('items-center gap-2'):
+                ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
+                if public_demo_href():
+                    ui.link('Try the demo', public_demo_href()).classes('lp-btn lp-btn-outline')
 
     with ui.element('div').classes('lp-page'):
         # Hero — full-bleed media + overlay + CTA group
@@ -547,6 +564,8 @@ def render_landing_page():
                 )
                 with ui.element('div').classes('lp-cta-row'):
                     ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
+                    if public_demo_href():
+                        ui.link('Try the demo', public_demo_href()).classes('lp-btn lp-btn-ghost')
                     ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-ghost')
 
         # About — split media / copy (like "We Can Help")
@@ -618,11 +637,20 @@ def render_landing_page():
         with ui.element('section').props('id=get-started').classes('lp-band'):
             with ui.element('div').classes('lp-band-inner lp-reveal'):
                 ui.html('<h2>Get Started</h2>', sanitize=False)
-                ui.html(
-                    '<p>Sign in to immediately access mentor reports, schedules, and workload tracking.</p>',
-                    sanitize=False,
-                )
+                if demo_mode():
+                    ui.html(
+                        '<p>Open the shared demo to look through mentor reports, schedules, '
+                        'and workload tracking. Reports you add are cleared the next time the demo restarts.</p>',
+                        sanitize=False,
+                    )
+                else:
+                    ui.html(
+                        '<p>Sign in to immediately access mentor reports, schedules, and workload tracking.</p>',
+                        sanitize=False,
+                    )
                 ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
+                if public_demo_href():
+                    ui.link('Try the demo', public_demo_href()).classes('lp-btn lp-btn-ghost')
 
         # Contact strip
         with ui.element('section').props('id=contact-us').classes('lp-contact'):
@@ -630,6 +658,8 @@ def render_landing_page():
                 ui.html('<h2>Questions about the Referee Mentor System?</h2>', sanitize=False)
                 with ui.row().classes('gap-3 flex-wrap'):
                     ui.link(cta_label, cta_href).classes('lp-btn lp-btn-ghost')
+                    if public_demo_href():
+                        ui.link('Try the demo', public_demo_href()).classes('lp-btn lp-btn-ghost')
                     ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-primary')
 
         with ui.element('footer').classes('lp-footer'):
