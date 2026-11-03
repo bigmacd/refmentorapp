@@ -265,6 +265,22 @@ def render_landing_page():
             flex-wrap: wrap;
             gap: 0.85rem;
         }
+        .lp-demo-note {
+            margin: 1.15rem 0 0;
+            font-size: 0.98rem;
+            line-height: 1.55;
+            color: rgba(255, 255, 255, 0.82);
+        }
+        .lp-demo-note a {
+            color: var(--lp-sky);
+            font-weight: 700;
+            text-decoration: underline;
+            text-underline-offset: 0.15em;
+            white-space: nowrap;
+        }
+        .lp-demo-note a:hover {
+            color: #ffffff;
+        }
         .lp-section {
             width: 100%;
             padding: 4.5rem 1.25rem;
@@ -378,6 +394,16 @@ def render_landing_page():
             font-size: 1.08rem;
             line-height: 1.7;
             margin: 0 0 1.6rem;
+        }
+        .lp-band p a {
+            color: var(--lp-sky);
+            font-weight: 700;
+            text-decoration: underline;
+            text-underline-offset: 0.15em;
+            white-space: nowrap;
+        }
+        .lp-band p a:hover {
+            color: #ffffff;
         }
         .lp-grid-section {
             background: var(--lp-navy);
@@ -548,6 +574,13 @@ def render_landing_page():
                 with ui.element('div').classes('lp-cta-row'):
                     ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
                     ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-ghost')
+                ui.html(
+                    '<p>  </p>'
+                    '<p class="lp-demo-note">Want to look around first? '
+                    '<a href="https://demo.refmentoring.us" target="_blank" rel="noopener">'
+                    'Try the demo</a></p>',
+                    sanitize=False,
+                )
 
         # About — split media / copy (like "We Can Help")
         with ui.element('section').props('id=about-us').classes('lp-section lp-waves'):
@@ -619,7 +652,9 @@ def render_landing_page():
             with ui.element('div').classes('lp-band-inner lp-reveal'):
                 ui.html('<h2>Get Started</h2>', sanitize=False)
                 ui.html(
-                    '<p>Sign in to immediately access mentor reports, schedules, and workload tracking.</p>',
+                    '<p>Sign in to immediately access mentor reports, schedules, and workload tracking.</p>'
+                    '<p>Or <a href="https://demo.refmentoring.us" target="_blank" rel="noopener">'
+                    'try the demo</a></p>',
                     sanitize=False,
                 )
                 ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
