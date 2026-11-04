@@ -89,11 +89,11 @@ def public_demo_href() -> str:
 
 
 def landing_primary_cta() -> tuple[str, str]:
-    """Landing page primary button: sign in, try the shared demo, or open the app."""
+    """Landing page primary button: sign in, or open the app if already logged in."""
     if state.auth_manager.is_authenticated():
         return APP_HOME, 'Open App'
     if demo_mode():
-        return '/demo', 'Try the demo'
+        return '/login', 'Try the demo'
     return '/login', 'Sign In'
 
 

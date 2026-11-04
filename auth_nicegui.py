@@ -771,29 +771,11 @@ def _shared_demo_account(username: Optional[str]) -> bool:
 
 
 @ui.page('/demo')
-def demo_entry(request: Request):
-    """Sign the visitor in as the shared demo account and open the app."""
+def demo_entry():
+    """Open the login screen. The shared demo account is demo / demo."""
     if not demo_mode():
         ui.navigate.to('/')
         return
-
-    auth_manager = AuthManager()
-    if auth_manager.is_authenticated():
-        ui.navigate.to(APP_HOME)
-        return
-
-    user = auth_manager.db.getUserByUsername('demo')
-    org_id = None
-    if user:
-        org_ids = auth_manager.db.getOrganizationIdsForUser(user['id'])
-        org_id = org_ids[0] if org_ids else None
-    if user and auth_manager.authenticate_user('demo', 'demo', organization_id=org_id):
-        auth_manager.log_current_user(request)
-        logging.info("Shared demo login, navigating to %s", APP_HOME)
-        ui.navigate.to(APP_HOME)
-        return
-
-    logging.error("Shared demo login failed")
     ui.navigate.to('/login')
 
 
@@ -836,6 +818,10 @@ def login_page():
     with ui.card().classes('login-container'):
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold text-center w-full mb-2')
         ui.label('Please log in to continue').classes('text-gray-300 text-center w-full mb-6')
+        if demo_mode():
+            ui.label(
+                'Shared demo account: username demo, password demo.'
+            ).classes('text-gray-400 text-center w-full mb-4')
 
         orgs = auth_manager.get_organizations()
         # NiceGUI select: dict keys = stored value, dict values = display label

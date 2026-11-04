@@ -1,0 +1,42 @@
+# fly.toml app configuration file generated for refmentorassignments on 2025-10-22T18:47:10-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+# Single process group: worker + UI on the same machine so they share /data.
+# Create the volume once: fly volumes create data_cache --region iad --size 1
+
+app = 'refmentorassignments'
+primary_region = 'iad'
+
+[build]
+
+[env]
+  DATA_CACHE_DIR = '/data/cache'
+  ALLOW_LIVE_FETCH = 'false'
+  SYNC_INTERVAL_HOURS = '2'
+  showmentored = 'false'
+  # Public origin used in password-reset emails (no trailing slash)
+  APP_BASE_URL = 'https://refmentoring.us'
+  # Homepage "Try the demo" button. The demo app signs that link in as demo/demo.
+  DEMO_PUBLIC_URL = 'https://demo.refmentoring.us/app'
+
+[processes]
+  app = "python3 newMain.py"
+
+[http_service]
+  internal_port = 443
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[mounts]]
+  source = 'data_cache'
+  destination = '/data'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  processes = ['app']

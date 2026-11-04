@@ -1,3 +1,5 @@
+# Demo image. Same as Dockerfile, plus the SQLite baseline restored on every start.
+# Build only from a checkout that has demo/refmentor.sqlite (that file is gitignored).
 FROM python:3.14.7-alpine3.24
 
 EXPOSE 443
@@ -11,8 +13,7 @@ COPY fonts /app/fonts
 COPY static /app/static
 COPY docs /app/docs
 COPY staging-root.crt /root/.postgresql/root.crt
-COPY mysoccerleague.com.chained.crt /app/mysoccerleague.com.chained.crt
-COPY psyched-runner-378322-6ea04e89b69e.json /app/psyched-runner-378322-6ea04e89b69e.json
+COPY demo/refmentor.sqlite /app/demo/refmentor.sqlite
 
 RUN apk upgrade --no-cache
 RUN python3 -m pip install --upgrade "pip>=26.2" "msgpack>=1.2.1" "setuptools>=83.0.0"

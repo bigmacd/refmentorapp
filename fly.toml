@@ -1,27 +1,37 @@
-# fly.toml app configuration file generated for refmentorassignments on 2025-10-22T18:47:10-04:00
+# Demo Fly.io config: shared demo/demo login, SQLite restored from the image on every start.
+# Deploy with: fly deploy -c fly.demo.toml --image-label demo-$(git rev-parse --short HEAD)
 #
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+# The baseline is demo/refmentor.sqlite in this repo (gitignored). Dockerfile.demo copies it
+# into the image. Each time the machine starts, that file replaces /data/refmentor.sqlite,
+# so reports a visitor added are gone. The machine stops when idle, which is the reset.
 #
-# Single process group: worker + UI on the same machine so they share /data.
-# Create the volume once: fly volumes create data_cache --region iad --size 1
+# One-time setup:
+#   fly apps create demo-refmentor
+#   fly volumes create data_cache --app demo-refmentor --region iad --size 1
+#   fly secrets set -a demo-refmentor STORAGE_SECRET=...
+#
+# Do not set production db_url. Do not scale this app above 1 machine (SQLite + volume).
+# Keep demo/refmentor.sqlite checkpointed (no leftover WAL) before deploying a new baseline.
 
-app = 'refmentorassignments'
+app = 'demo-refmentor'
 primary_region = 'iad'
 
 [build]
+  dockerfile = 'Dockerfile'
 
 [env]
+  DB_BACKEND = 'sqlite'
+  SQLITE_PATH = '/data/refmentor.sqlite'
+  DEMO_MODE = 'true'
+  DEMO_BASELINE_PATH = '/app/demo/refmentor.sqlite'
   DATA_CACHE_DIR = '/data/cache'
   ALLOW_LIVE_FETCH = 'false'
-  SYNC_INTERVAL_HOURS = '2'
-  showmentored = 'false'
-  # Public origin used in password-reset emails (no trailing slash)
-  APP_BASE_URL = 'https://refmentoring.us'
-  # Homepage "Try the demo" button. The demo app signs that link in as demo/demo.
-  DEMO_PUBLIC_URL = 'https://demo.refmentoring.us/app'
+  showmentored = 'true'
+  APP_BASE_URL = 'https://demo.refmentoring.us/app'
 
+# UI only. Demo data is the snapshot in the image; a sync worker would only add noise.
 [processes]
-  app = "python3 newMain.py"
+  app = 'python3 newMain.py'
 
 [http_service]
   internal_port = 443
