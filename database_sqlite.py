@@ -14,6 +14,7 @@ import re
 import shutil
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import date, datetime, time as dt_time, timezone
 from pathlib import Path
@@ -32,8 +33,19 @@ def demo_mode() -> bool:
 
 
 DEMO_SESSION_DB_KEY = 'demo_db_path'
+#DEMO_SESSION_MAX_AGE_SECONDS = 10 * 60 * 60
+#DEMO_SESSION_SWEEP_INTERVAL_SECONDS = 60 * 60
+DEMO_SESSION_MAX_AGE_SECONDS = 100
+DEMO_SESSION_SWEEP_INTERVAL_SECONDS = 60
+_SESSION_DB_NAME = re.compile(r'^refmentor-[0-9a-f]{32}\.sqlite$')
 _schema_ready_paths: set[str] = set()
 _schema_ready_lock = threading.Lock()
+_sweeper_started = False
+_sweeper_lock = threading.Lock()
+
+
+class DemoSessionExpired(Exception):
+    """The visitor's demo database was removed while they were still signed in."""
 
 
 def restore_sqlite_baseline(baseline: Path, target: Path) -> None:
@@ -98,10 +110,76 @@ def provision_demo_session_database() -> str:
     return str(target)
 
 
-def session_demo_db_path() -> Optional[str]:
-    """Path stored for this browser session, when this request has one."""
+def delete_sqlite_file(path: Path) -> None:
+    """Remove a SQLite file and the WAL/SHM sidecars beside it."""
+    target = Path(path)
+    for sidecar in (target, Path(f'{target}-wal'), Path(f'{target}-shm')):
+        try:
+            sidecar.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove %s", sidecar, exc_info=True)
+
+
+def file_created_at(path: Path) -> float:
+    """Birth time when the filesystem has one, otherwise the inode change time."""
+    stat = path.stat()
+    birth = getattr(stat, 'st_birthtime', None)
+    if birth:
+        return float(birth)
+    return float(stat.st_ctime)
+
+
+def sweep_abandoned_demo_databases(
+    max_age_seconds: float = DEMO_SESSION_MAX_AGE_SECONDS,
+    now: Optional[float] = None,
+) -> int:
+    """Delete per-login demo databases created more than max_age_seconds ago."""
     if not demo_mode():
-        return None
+        return 0
+    clock = time.time() if now is None else now
+    directory = Path(sqlite_db_path()).parent
+    if not directory.is_dir():
+        return 0
+    removed = 0
+    for path in directory.glob('refmentor-*.sqlite'):
+        if not _SESSION_DB_NAME.match(path.name):
+            continue
+        try:
+            age = clock - file_created_at(path)
+        except OSError:
+            logger.warning("Could not stat %s", path, exc_info=True)
+            continue
+        if age < max_age_seconds:
+            continue
+        logger.info("Removing abandoned demo database %s (age %.0f seconds)", path, age)
+        delete_sqlite_file(path)
+        removed += 1
+    return removed
+
+
+def start_demo_session_sweeper() -> None:
+    """Sweep once now, then hourly, inside this process."""
+    global _sweeper_started
+    if not demo_mode():
+        return
+    with _sweeper_lock:
+        if _sweeper_started:
+            return
+        _sweeper_started = True
+    sweep_abandoned_demo_databases()
+
+    def loop() -> None:
+        while True:
+            time.sleep(DEMO_SESSION_SWEEP_INTERVAL_SECONDS)
+            try:
+                sweep_abandoned_demo_databases()
+            except Exception:
+                logger.exception("Demo session cleanup failed")
+
+    threading.Thread(target=loop, name='demo-session-cleanup', daemon=True).start()
+
+
+def _stored_demo_db_path() -> Optional[str]:
     try:
         from nicegui import app
         path = app.storage.user.get(DEMO_SESSION_DB_KEY)
@@ -109,10 +187,36 @@ def session_demo_db_path() -> Optional[str]:
         return None
     if not path:
         return None
-    if not Path(path).is_file():
-        logger.warning("Demo session database missing at %s", path)
-        return None
     return str(path)
+
+
+def expire_demo_session() -> None:
+    """Clear the signed-in demo visitor and send them back to the login screen."""
+    logger.info("Demo session database is gone; returning to login")
+    try:
+        from nicegui import app, ui
+        try:
+            app.storage.user.clear()
+        except Exception:
+            logger.debug("Could not clear demo session storage", exc_info=True)
+        ui.navigate.to('/login?demo_timeout=1')
+    except Exception:
+        logger.exception("Could not end expired demo session")
+    raise DemoSessionExpired()
+
+
+def session_demo_db_path() -> Optional[str]:
+    """Path stored for this browser session, when this request has one."""
+    if not demo_mode():
+        return None
+    path = _stored_demo_db_path()
+    if not path:
+        return None
+    if Path(path).is_file():
+        return path
+    logger.warning("Demo session database missing at %s", path)
+    expire_demo_session()
+    return None
 
 
 def active_sqlite_path() -> str:

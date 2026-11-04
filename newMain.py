@@ -23,7 +23,7 @@ from pdfWriter import pdf_bytes_from_session_rows, pdf_bytes_from_year_end_summa
 from year_end_summary import text_from_year_end_summary
 from mentor_game_selection import MentorGameSelection
 from auth_nicegui import APP_HOME, HELP_PATH, render_app_header
-from database_sqlite import demo_mode, restore_demo_baseline_if_enabled
+from database_sqlite import demo_mode, restore_demo_baseline_if_enabled, start_demo_session_sweeper
 from report_sessions import (
     csv_bytes_from_session_rows,
     preview_text_from_session_rows,
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # Before any connection opens a database. Demo startup refreshes the auth copy
 # from the golden file. Each demo login then gets its own copy of that file.
 restore_demo_baseline_if_enabled()
+start_demo_session_sweeper()
 
 state = AppState(logger, ui)
 

@@ -3,6 +3,7 @@
 import hashlib
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,11 +12,15 @@ from unittest.mock import patch
 from auth_nicegui import AuthManager
 from database import get_db
 from database_sqlite import (
+    DEMO_SESSION_DB_KEY,
+    DemoSessionExpired,
     RefereeDbSqlite,
     active_sqlite_path,
     demo_auth_db_path,
     prepare_demo_auth_database,
     provision_demo_session_database,
+    session_demo_db_path,
+    sweep_abandoned_demo_databases,
 )
 
 
@@ -94,3 +99,33 @@ class TestDemoSessionDatabase(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertTrue(Path(first).is_file())
         self.assertTrue(Path(second).is_file())
+
+    def test_sweep_deletes_session_files_older_than_ten_hours(self):
+        prepare_demo_auth_database()
+        old = Path(provision_demo_session_database())
+        new = Path(provision_demo_session_database())
+        wal = Path(f'{old}-wal')
+        wal.write_bytes(b'wal')
+        created = {old.resolve(): 0.0, new.resolve(): time.time()}
+
+        def fake_created(path):
+            return created.get(Path(path).resolve(), time.time())
+
+        with patch('database_sqlite.file_created_at', fake_created):
+            removed = sweep_abandoned_demo_databases(now=time.time())
+
+        self.assertEqual(removed, 1)
+        self.assertFalse(old.exists())
+        self.assertFalse(wal.exists())
+        self.assertTrue(new.exists())
+        self.assertTrue(demo_auth_db_path().is_file())
+
+    def test_missing_session_file_ends_the_demo_login(self):
+        storage = SimpleNamespace(
+            user={DEMO_SESSION_DB_KEY: str(Path(self._tmpdir.name) / 'gone.sqlite')},
+            browser={},
+        )
+        with patch('auth_nicegui.app.storage', storage):
+            with self.assertRaises(DemoSessionExpired):
+                session_demo_db_path()
+        self.assertEqual(storage.user, {})

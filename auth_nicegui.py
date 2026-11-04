@@ -9,8 +9,6 @@ import secrets
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
 from typing import Optional, Tuple
 from urllib.parse import urlencode
 
@@ -30,7 +28,12 @@ from avatars import (
     save_avatar,
 )
 from database import RefereeDbCockroach, get_db
-from database_sqlite import DEMO_SESSION_DB_KEY, demo_mode, provision_demo_session_database
+from database_sqlite import (
+    DEMO_SESSION_DB_KEY,
+    delete_sqlite_file,
+    demo_mode,
+    provision_demo_session_database,
+)
 from sendemail import SendMailSimple
 
 # Password validation schema
@@ -164,9 +167,7 @@ class AuthManager:
         try:
             db_path = app.storage.user.get(DEMO_SESSION_DB_KEY)
             if db_path:
-                target = Path(db_path)
-                for sidecar in (target, Path(f'{target}-wal'), Path(f'{target}-shm')):
-                    sidecar.unlink(missing_ok=True)
+                delete_sqlite_file(db_path)
             app.storage.user.clear()
         except RuntimeError:
             pass
@@ -809,12 +810,13 @@ def demo_entry():
 
 
 @ui.page('/login')
-def login_page():
+def login_page(request: Request):
     """Login page"""
     auth_manager = AuthManager()
     if auth_manager.is_authenticated():
         ui.navigate.to(APP_HOME)
         return
+    demo_timed_out = (request.query_params.get('demo_timeout') or '') == '1'
 
 
     # Apply dark mode via head HTML script that runs on page load
@@ -847,6 +849,10 @@ def login_page():
     with ui.card().classes('login-container'):
         ui.label('🏆 Referee Mentor System').classes('text-2xl font-bold text-center w-full mb-2')
         ui.label('Please log in to continue').classes('text-gray-300 text-center w-full mb-6')
+        if demo_timed_out:
+            ui.label('Demo session has timed out.').classes(
+                'text-amber-400 text-center w-full mb-4'
+            )
         if demo_mode():
             ui.label(
                 'Shared demo account: username demo, password demo.'
