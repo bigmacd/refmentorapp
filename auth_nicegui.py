@@ -9,12 +9,15 @@ import secrets
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
 from typing import Optional, Tuple
 from urllib.parse import urlencode
 
 from nicegui import ui, app
 from fastapi import Request
 from password_validator import PasswordValidator
+
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -155,13 +158,20 @@ class AuthManager:
         _load_user_settings_into_session(user, self.db)
         return True
 
+
     def logout(self):
         """Logout the current user"""
         try:
+            db_path = app.storage.user.get(DEMO_SESSION_DB_KEY)
+            if db_path:
+                target = Path(db_path)
+                for sidecar in (target, Path(f'{target}-wal'), Path(f'{target}-shm')):
+                    sidecar.unlink(missing_ok=True)
             app.storage.user.clear()
         except RuntimeError:
             pass
         ui.navigate.to('/login')
+
 
     def _storage_get(self, key: str, default=None):
         """Read session storage; returns default outside a browser request (e.g. background threads)."""
