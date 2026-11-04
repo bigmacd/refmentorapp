@@ -27,7 +27,7 @@ from avatars import (
     save_avatar,
 )
 from database import RefereeDbCockroach, get_db
-from database_sqlite import demo_mode
+from database_sqlite import DEMO_SESSION_DB_KEY, demo_mode, provision_demo_session_database
 from sendemail import SendMailSimple
 
 # Password validation schema
@@ -86,7 +86,20 @@ class AuthManager:
     """Handles user authentication and session management"""
 
     def __init__(self):
-        self.db = get_db()
+        self._db = None
+
+    @property
+    def db(self):
+        """Demo mode resolves the database from the current browser session."""
+        if demo_mode():
+            return get_db()
+        if self._db is None:
+            self._db = get_db()
+        return self._db
+
+    @db.setter
+    def db(self, value):
+        self._db = value
 
     def hash_password(self, password: str, salt: str = None) -> Tuple[str, str]:
         """Hash a password with salt"""
@@ -118,6 +131,13 @@ class AuthManager:
         if organization_id is not None and not self.db.userBelongsToOrganization(user['id'], organization_id):
             logging.error(f"User {username} does not belong to organization {organization_id}")
             return False
+        self.db.updateLastLogin(username)
+        if demo_mode():
+            try:
+                app.storage.user[DEMO_SESSION_DB_KEY] = provision_demo_session_database()
+            except Exception:
+                logging.exception("Could not provision demo session database")
+                return False
         # Store in app storage
         app.storage.user['authenticated'] = True
         app.storage.user['username'] = username
@@ -133,7 +153,6 @@ class AuthManager:
             app.storage.user['organization_name'] = None
 
         _load_user_settings_into_session(user, self.db)
-        self.db.updateLastLogin(username)
         return True
 
     def logout(self):
@@ -1141,8 +1160,8 @@ def settings_page():
             ui.label('Password').classes('text-lg font-semibold mb-1')
             if _shared_demo_account(username):
                 ui.label(
-                    'This is the shared demo login. The password stays demo, and reports you add '
-                    'are cleared the next time the demo restarts.'
+                    'This is the shared demo login. The password stays demo, and each login '
+                    'starts from a fresh copy of the demo data.'
                 ).classes('text-sm text-gray-400')
             else:
                 ui.label(PASSWORD_REQUIREMENTS).classes('text-sm text-gray-400 mb-4')

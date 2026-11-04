@@ -2,6 +2,7 @@
 import threading
 
 from database import get_db
+from database_sqlite import demo_mode
 from auth_nicegui import AuthManager
 from uiData import getAllData
 from generateWorkload import WorkloadGenerator, resolve_workload_organization_id
@@ -14,7 +15,7 @@ class AppState:
         self.logger = logger
         self.ui = ui
         self.auth_manager = AuthManager()
-        self.db = get_db()
+        self._db = None
         self.all_match_data = None
         self.dates = []
         self.match_data_org_id = None
@@ -27,6 +28,15 @@ class AppState:
         self.workload_error = None
         self.workload_loading = False
         self._workload_lock = threading.Lock()
+
+    @property
+    def db(self):
+        """Demo requests open that visitor's database. Other modes keep one connection."""
+        if demo_mode():
+            return get_db()
+        if self._db is None:
+            self._db = get_db()
+        return self._db
 
     def _data_org_id(self, organization_id=None) -> int:
         if organization_id is not None:

@@ -1,9 +1,9 @@
-# Demo Fly.io config: shared demo/demo login, SQLite restored from the image on every start.
+# Demo Fly.io config: shared demo/demo login, one SQLite file per login.
 # Deploy with: fly deploy -c fly.demo.toml --image-label demo-$(git rev-parse --short HEAD)
 #
-# The baseline is demo/refmentor.sqlite in this repo (gitignored). Dockerfile.demo copies it
-# into the image. Each time the machine starts, that file replaces /data/refmentor.sqlite,
-# so reports a visitor added are gone. The machine stops when idle, which is the reset.
+# The golden file is demo/refmentor.sqlite in this repo (gitignored). The image
+# contains it. Startup copies it to /data/refmentor-auth.sqlite for login checks.
+# Each demo login copies it again to /data/refmentor-<uuid>.sqlite for that visitor.
 #
 # One-time setup:
 #   fly apps create demo-refmentor

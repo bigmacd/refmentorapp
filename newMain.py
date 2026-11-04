@@ -31,8 +31,8 @@ from report_sessions import (
 
 logger = logging.getLogger(__name__)
 
-# Before any connection opens the live file. A demo restart drops visitor reports
-# and puts demo/refmentor.sqlite back.
+# Before any connection opens a database. Demo startup refreshes the auth copy
+# from the golden file. Each demo login then gets its own copy of that file.
 restore_demo_baseline_if_enabled()
 
 state = AppState(logger, ui)
@@ -640,7 +640,7 @@ def render_landing_page():
                 if demo_mode():
                     ui.html(
                         '<p>Open the shared demo to look through mentor reports, schedules, '
-                        'and workload tracking. Reports you add are cleared the next time the demo restarts.</p>',
+                        'and workload tracking. Each login starts from a fresh copy of the demo data.</p>',
                         sanitize=False,
                     )
                 else:

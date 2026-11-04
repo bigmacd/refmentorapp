@@ -2081,10 +2081,14 @@ def use_sqlite_backend() -> bool:
 
 
 def get_db():
-    """Return the active database implementation (Cockroach by default, SQLite for demo/local)."""
+    """Return the active database implementation (Cockroach by default, SQLite for demo/local).
+
+    In demo mode the file is the browser session's copy when one has been
+    provisioned, and the auth copy otherwise.
+    """
     if use_sqlite_backend():
-        from database_sqlite import RefereeDbSqlite
-        return RefereeDbSqlite()
+        from database_sqlite import RefereeDbSqlite, active_sqlite_path
+        return RefereeDbSqlite(active_sqlite_path())
     return RefereeDbCockroach()
 
 

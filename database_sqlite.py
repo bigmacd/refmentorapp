@@ -13,6 +13,8 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
+import uuid
 from datetime import date, datetime, time as dt_time, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -27,6 +29,11 @@ _NOW_UTC = "(NOW() AT TIME ZONE 'UTC')::TIMESTAMP"
 def demo_mode() -> bool:
     """True on the public demo app, where visitors share the demo/demo login."""
     return (os.environ.get('DEMO_MODE') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+DEMO_SESSION_DB_KEY = 'demo_db_path'
+_schema_ready_paths: set[str] = set()
+_schema_ready_lock = threading.Lock()
 
 
 def restore_sqlite_baseline(baseline: Path, target: Path) -> None:
@@ -47,27 +54,75 @@ def restore_sqlite_baseline(baseline: Path, target: Path) -> None:
     os.replace(temporary, target)
 
 
-def restore_demo_baseline_if_enabled() -> bool:
-    """On demo startup, put the packaged baseline back over the live SQLite file."""
+def demo_golden_path() -> Path:
+    """Packaged baseline. Never open this file; copy it."""
+    configured = (os.environ.get('DEMO_BASELINE_PATH') or '').strip()
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parent / 'demo' / 'refmentor.sqlite'
+
+
+def demo_auth_db_path() -> Path:
+    """Stable copy used for login and password checks."""
+    return Path(sqlite_db_path()).parent / 'refmentor-auth.sqlite'
+
+
+def prepare_demo_auth_database() -> bool:
+    """Refresh the auth database from the golden file. The golden file stays closed."""
     if not demo_mode():
         return False
-    baseline = Path(
-        os.environ.get('DEMO_BASELINE_PATH')
-        or (Path(__file__).resolve().parent / 'demo' / 'refmentor.sqlite')
-    )
-    target = Path(sqlite_db_path())
+    baseline = demo_golden_path()
+    target = demo_auth_db_path()
     if not baseline.is_file():
         logger.warning(
-            "Demo baseline not found at %s; leaving the live database in place",
+            "Demo baseline not found at %s; leaving the auth database in place",
             baseline,
         )
         return False
-    if baseline.resolve() == target.resolve():
-        logger.info("Demo baseline and live database are the same file (%s)", target)
-        return False
     restore_sqlite_baseline(baseline, target)
-    logger.info("Restored demo database from %s to %s", baseline, target)
+    logger.info("Prepared demo auth database from %s to %s", baseline, target)
     return True
+
+
+def restore_demo_baseline_if_enabled() -> bool:
+    """On demo startup, refresh the auth copy from the golden file."""
+    return prepare_demo_auth_database()
+
+
+def provision_demo_session_database() -> str:
+    """Copy the golden file to a new per-login database and return its path."""
+    session_id = uuid.uuid4().hex
+    target = Path(sqlite_db_path()).parent / f'refmentor-{session_id}.sqlite'
+    restore_sqlite_baseline(demo_golden_path(), target)
+    logger.info("Provisioned demo session database %s", target)
+    return str(target)
+
+
+def session_demo_db_path() -> Optional[str]:
+    """Path stored for this browser session, when this request has one."""
+    if not demo_mode():
+        return None
+    try:
+        from nicegui import app
+        path = app.storage.user.get(DEMO_SESSION_DB_KEY)
+    except Exception:
+        return None
+    if not path:
+        return None
+    if not Path(path).is_file():
+        logger.warning("Demo session database missing at %s", path)
+        return None
+    return str(path)
+
+
+def active_sqlite_path() -> str:
+    """Session copy for a logged-in demo visitor, otherwise the auth copy or SQLITE_PATH."""
+    session_path = session_demo_db_path()
+    if session_path:
+        return session_path
+    if demo_mode():
+        return str(demo_auth_db_path())
+    return sqlite_db_path()
 
 
 def sqlite_db_path() -> str:
@@ -137,21 +192,25 @@ sqlite3.register_converter('TIME', _convert_time)
 class RefereeDbSqlite(RefereeDbCockroach):
     """Same public API as RefereeDbCockroach, backed by a local SQLite file."""
 
-    def __init__(self):
-        self.db_path = sqlite_db_path()
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or sqlite_db_path()
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connectToDb()
-        if not self._tableExists('referees'):
-            self.createDb()
-        else:
-            self._ensureSqliteSchema()
-        self._ensureOrganizationsSeeded()
-        try:
-            from avatars import import_legacy_file_avatars
-            import_legacy_file_avatars(self)
-        except Exception:
-            logging.exception('Could not import legacy avatar files')
-        self._ensureOneMentorPerGameConstraint()
+        with _schema_ready_lock:
+            if self.db_path in _schema_ready_paths:
+                return
+            if not self._tableExists('referees'):
+                self.createDb()
+            else:
+                self._ensureSqliteSchema()
+            self._ensureOrganizationsSeeded()
+            try:
+                from avatars import import_legacy_file_avatars
+                import_legacy_file_avatars(self)
+            except Exception:
+                logging.exception('Could not import legacy avatar files')
+            self._ensureOneMentorPerGameConstraint()
+            _schema_ready_paths.add(self.db_path)
 
     def _connectToDb(self):
         self.connection = sqlite3.connect(
