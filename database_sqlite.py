@@ -33,10 +33,8 @@ def demo_mode() -> bool:
 
 
 DEMO_SESSION_DB_KEY = 'demo_db_path'
-#DEMO_SESSION_MAX_AGE_SECONDS = 10 * 60 * 60
-#DEMO_SESSION_SWEEP_INTERVAL_SECONDS = 60 * 60
-DEMO_SESSION_MAX_AGE_SECONDS = 100
-DEMO_SESSION_SWEEP_INTERVAL_SECONDS = 60
+DEMO_SESSION_MAX_AGE_SECONDS = 10 * 60 * 60
+DEMO_SESSION_SWEEP_INTERVAL_SECONDS = 60 * 60
 _SESSION_DB_NAME = re.compile(r'^refmentor-[0-9a-f]{32}\.sqlite$')
 _schema_ready_paths: set[str] = set()
 _schema_ready_lock = threading.Lock()
