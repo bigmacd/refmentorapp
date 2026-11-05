@@ -104,7 +104,7 @@ class RefereeDbCockroach(object):
                 self._createSupportInquiriesTable()
 
             # Existing DBs restored from pre-multi-tenant backups need column migrations
-            self._migrateMultiTenantSchema()
+            # self._migrateMultiTenantSchema()
 
         # Fresh createDb() path also needs org tables + columns before first use
         if self._tableExists('referees') and not self._columnExists('referees', 'organization_id'):
