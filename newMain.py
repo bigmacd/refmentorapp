@@ -612,17 +612,7 @@ def render_landing_page():
                     'notes with a clear workflow.</p>',
                     sanitize=False,
                 )
-                ui.link('Get Started', '#get-started').classes('lp-btn lp-btn-primary')
-
-        # Get started — second CTA band
-        with ui.element('section').props('id=get-started').classes('lp-band'):
-            with ui.element('div').classes('lp-band-inner lp-reveal'):
-                ui.html('<h2>Get Started</h2>', sanitize=False)
-                ui.html(
-                    '<p>Sign in to immediately access mentor reports, schedules, and workload tracking.</p>',
-                    sanitize=False,
-                )
-                ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
+                ui.link('Try the Demo', 'https://demo.refmentoring.us/app').classes('lp-btn lp-btn-primary')
 
         # Contact strip
         with ui.element('section').props('id=contact-us').classes('lp-contact'):
