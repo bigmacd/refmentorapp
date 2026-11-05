@@ -4,6 +4,7 @@ NiceGUI-based Referee Mentor System
 Converted from Streamlit version
 """
 
+import html
 import logging
 from datetime import datetime as dtime
 import os
@@ -23,12 +24,52 @@ from pdfWriter import pdf_bytes_from_session_rows, pdf_bytes_from_year_end_summa
 from year_end_summary import text_from_year_end_summary
 from mentor_game_selection import MentorGameSelection
 from auth_nicegui import APP_HOME, HELP_PATH, render_app_header
+from sendemail import SendMailSimple
 from report_sessions import (
     csv_bytes_from_session_rows,
     preview_text_from_session_rows,
 )
 
 logger = logging.getLogger(__name__)
+
+# Public contact-form reasons. Kept as a tuple so the dropdown and server check stay in sync.
+SUPPORT_REASONS = (
+    'General question',
+    'Request a demo',
+    'Getting started',
+    'Account or login help',
+    'Technical problem',
+    'Feature request',
+    'Organization or partnership inquiry',
+    'Other',
+)
+_CONTACT_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+_CONTACT_MESSAGE_MAX = 4000
+
+
+def contact_form_error(email: str, reason: str, comments: str) -> str | None:
+    """Return a visitor-facing validation message, or None when the form is ready to store."""
+    if not _CONTACT_EMAIL_RE.fullmatch(email) or len(email) > 254:
+        return 'Enter a valid email address.'
+    if reason not in SUPPORT_REASONS:
+        return 'Choose a reason.'
+    if not comments:
+        return 'Enter a question or comment.'
+    if len(comments) > _CONTACT_MESSAGE_MAX:
+        return f'Please keep comments under {_CONTACT_MESSAGE_MAX} characters.'
+    return None
+
+
+def support_inquiry_email_html(email: str, reason: str, comments: str) -> str:
+    safe_comments = html.escape(comments).replace('\n', '<br>')
+    return (
+        '<h3>New contact form submission</h3>'
+        f'<p><b>Email:</b> {html.escape(email)}</p>'
+        f'<p><b>Reason:</b> {html.escape(reason)}</p>'
+        '<p><b>Question or comments:</b></p>'
+        f'<p>{safe_comments}</p>'
+    )
+
 
 state = AppState(logger, ui)
 
@@ -173,6 +214,24 @@ def render_landing_page():
         }
         .lp-btn:hover {
             transform: translateY(-1px);
+        }
+        .q-btn.lp-btn {
+            text-transform: none;
+            letter-spacing: normal;
+            min-height: 0;
+            padding: 0.7rem 1.35rem;
+        }
+        .q-btn.lp-btn-primary {
+            background: var(--lp-accent) !important;
+            color: #ffffff !important;
+        }
+        .q-btn.lp-btn-primary:hover {
+            background: #1f58d0 !important;
+        }
+        .lp-contact-dialog {
+            background: #ffffff !important;
+            color: var(--lp-ink);
+            width: min(32rem, 92vw);
         }
         .lp-btn-primary {
             background: var(--lp-accent);
@@ -524,7 +583,7 @@ def render_landing_page():
                 ui.link('About', '#about-us')
                 ui.link('Why Us', '#why-choose')
                 ui.link('How it Works', '#how-it-works')
-                ui.link('Help', HELP_PATH)
+                ui.link('Help', HELP_PATH, new_tab=True)
                 ui.link('Contact', '#contact-us')
             ui.link(cta_label, cta_href).classes('lp-btn lp-btn-primary')
 
@@ -614,16 +673,80 @@ def render_landing_page():
                 )
                 ui.link('Try the Demo', 'https://demo.refmentoring.us/app').classes('lp-btn lp-btn-primary')
 
+        def open_contact_dialog():
+            with ui.dialog() as dialog, ui.card().classes('lp-contact-dialog p-6'):
+                ui.label('Contact us').classes('text-h6 text-weight-bold')
+                ui.label('We will reply to the email address you enter.').classes('text-sm text-grey-7')
+                email_input = ui.input('Email').classes('w-full').props('type=email')
+                reason_select = ui.select(
+                    list(SUPPORT_REASONS),
+                    label='Reason',
+                    value=None,
+                ).classes('w-full')
+                message_input = ui.textarea('Question or comments').classes('w-full').props('rows=5')
+
+                def submit_contact():
+                    email = (email_input.value or '').strip()
+                    reason = (reason_select.value or '').strip()
+                    comments = (message_input.value or '').strip()
+                    error = contact_form_error(email, reason, comments)
+                    if error:
+                        ui.notify(error, type='warning')
+                        return
+                    try:
+                        state.db.addSupportInquiry(email, reason, comments)
+                    except Exception:
+                        logger.exception('Could not store support inquiry from %s', email)
+                        ui.notify('We could not save your message. Please try again.', type='negative')
+                        return
+
+                    support_user = (os.environ.get('SUPPORT_EMAIL_USER') or '').strip()
+                    recipient = (os.environ.get('SUPPORT_EMAIL_TO') or support_user).strip()
+                    if not support_user or not os.environ.get('SUPPORT_EMAIL_TOKEN') or not recipient:
+                        logger.error('Support inquiry saved for %s but support email is not configured', email)
+                        ui.notify(
+                            'We saved your message, but the notification email is not configured.',
+                            type='warning',
+                        )
+                        dialog.close()
+                        return
+                    try:
+                        SendMailSimple().sendSupportEmail(
+                            recipient,
+                            f'Referee Mentor contact: {reason}',
+                            support_inquiry_email_html(email, reason, comments),
+                            reply_to=email,
+                        )
+                    except Exception:
+                        logger.exception('Support inquiry from %s was saved but the email failed', email)
+                        ui.notify(
+                            'We saved your message, but the notification email did not send.',
+                            type='warning',
+                        )
+                        dialog.close()
+                        return
+
+                    ui.notify('Thanks. We received your message and will get back to you.', type='positive')
+                    dialog.close()
+
+                with ui.row().classes('w-full justify-end gap-2 mt-2'):
+                    ui.button('Cancel', on_click=dialog.close).props('flat no-caps')
+                    ui.button('Send', on_click=submit_contact).props('unelevated no-caps color=primary')
+
+            dialog.open()
+
         # Contact strip
         with ui.element('section').props('id=contact-us').classes('lp-contact'):
             with ui.element('div').classes('lp-contact-inner lp-reveal'):
                 ui.html('<h2>Questions about the Referee Mentor System?</h2>', sanitize=False)
-                with ui.row().classes('gap-3 flex-wrap'):
-                    ui.link(cta_label, cta_href).classes('lp-btn lp-btn-ghost')
-                    ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-primary')
+                with ui.row().classes('gap-3 flex-wrap items-center'):
+                    ui.button('Contact Us', on_click=open_contact_dialog).classes(
+                        'lp-btn lp-btn-primary'
+                    ).props('unelevated no-caps')
+                    ui.link('Learn More', '#about-us').classes('lp-btn lp-btn-ghost')
 
         with ui.element('footer').classes('lp-footer'):
-            ui.link('Help', HELP_PATH)
+            ui.link('Help', HELP_PATH, new_tab=True)
             ui.label(f'© {dtime.now().year} Swynga LLC. All rights reserved.')
 
     ui.add_body_html('''

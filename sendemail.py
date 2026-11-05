@@ -39,6 +39,27 @@ class SendMailSimple():
             server.send_message(self.message)
 
 
+    def sendSupportEmail(self, recipient: str, subject: str, message: str, reply_to: str | None = None) -> None:
+        """Send a contact notification into the support inbox.
+
+        Proton addresses Reply to the original To header on mail sent from the
+        same account, and does not use Reply-To. The visitor is placed in To
+        and Reply-To. Delivery uses the support inbox as the only envelope
+        recipient, so the visitor is not sent a copy.
+        """
+        support_user = os.environ.get('SUPPORT_EMAIL_USER')
+        visible_to = reply_to or recipient
+        self.message(visible_to, subject, message)
+        # Proton rejects a From address that does not match the authenticated mailbox.
+        del self.message['From']
+        self.message['From'] = support_user
+        if reply_to:
+            self.message['Reply-To'] = reply_to
+        with smtplib.SMTP(self.mailserver, self.serverPort) as server:
+            server.starttls()
+            server.login(support_user, os.environ.get('SUPPORT_EMAIL_TOKEN'))
+            server.send_message(self.message, to_addrs=[recipient])
+
 
 class GmailAPIEmail():
 

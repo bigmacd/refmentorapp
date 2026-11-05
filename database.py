@@ -99,6 +99,10 @@ class RefereeDbCockroach(object):
             if not self.cursor.fetchone()[0] == 1:
                 self._createMentorGameSelectionsTable()
 
+            self.executeSql(" SELECT count(table_name) FROM information_schema.tables WHERE table_schema LIKE 'public' AND table_type LIKE 'BASE TABLE' AND table_name='support_inquiries'")
+            if not self.cursor.fetchone()[0] == 1:
+                self._createSupportInquiriesTable()
+
             # Existing DBs restored from pre-multi-tenant backups need column migrations
             self._migrateMultiTenantSchema()
 
@@ -518,6 +522,7 @@ class RefereeDbCockroach(object):
         self._createLogsTable()
         self._createCalendarEventsTable()
         self._createMentorGameSelectionsTable()
+        self._createSupportInquiriesTable()
 
 
     def _createNewGameDetailTable(self):
@@ -652,6 +657,23 @@ class RefereeDbCockroach(object):
                                                       selected_at TIMESTAMP NOT NULL DEFAULT NOW(),
                                                       UNIQUE(organization_id, mentor_id, game_date, venue, game_id))"""
         self.executeSql(sql)
+
+    def _createSupportInquiriesTable(self):
+        sql = """CREATE TABLE support_inquiries (id SERIAL PRIMARY KEY,
+                                                  email TEXT NOT NULL,
+                                                  reason TEXT NOT NULL,
+                                                  message TEXT NOT NULL,
+                                                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"""
+        self.executeSql(sql)
+
+    def addSupportInquiry(self, email: str, reason: str, message: str) -> int:
+        """Store a public contact-form submission. Returns the new row id."""
+        sql = """INSERT INTO support_inquiries (email, reason, message)
+                 VALUES (%s, %s, %s) RETURNING id"""
+        self.executeSql(sql, (email, reason, message))
+        inquiry_id = self.cursor.fetchone()[0]
+        self.connection.commit()
+        return inquiry_id
 
     def _ensureOneMentorPerGameConstraint(self) -> None:
         """Keep one mentor per game (org + date + venue + game_id)."""
