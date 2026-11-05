@@ -148,6 +148,43 @@ class TestRefereeDbSqlite(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.db.getYearEndSummary('2026 OR 1=1 --', org_id)
 
+    def test_year_end_summary_resolves_renamed_mentor_ids(self):
+        org_id = self.db.getDefaultOrganizationId()
+        self.db.executeSql('DROP TABLE mentors')
+        self.db.executeSql(
+            """CREATE TABLE old_mentors (
+                id INTEGER PRIMARY KEY,
+                mentor_last_name TEXT NOT NULL,
+                mentor_first_name TEXT NOT NULL
+            )"""
+        )
+        self.db.executeSql(
+            "INSERT INTO old_mentors (id, mentor_last_name, mentor_first_name) VALUES (%s, %s, %s)",
+            (50, 'aguilera', 'michael'),
+        )
+        self.db.createUser('michael', 'h', 's', 'michael@example.com', 'user', 'michael', 'aguilera')
+        user = self.db.getUserByUsername('michael')
+        self.db.addUserToOrganization(user['id'], org_id)
+        self.assertNotEqual(user['id'], 50)
+        self.db.addReferee('smith', 'alex', 2026, org_id)
+        mentee = self.db.findReferee('smith', 'alex', org_id)
+        self.db.executeSql(
+            """INSERT INTO mentor_sessions (mentor, mentee, position, date, comments, gameid)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (50, mentee[0], 'Center', '2026-04-18 00:00:00', 'legacy id', 'G-old'),
+        )
+        self.db.executeSql(
+            """INSERT INTO mentor_sessions (mentor, mentee, position, date, comments, gameid)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (user['id'], mentee[0], 'AR1', '2026-09-05 00:00:00', 'user id', 'G-new'),
+        )
+
+        summary = self.db.getYearEndSummary(2026, org_id)
+        self.assertEqual(
+            [(mentor.name, mentor.reports, mentor.referees) for mentor in summary.mentors],
+            [('Michael Aguilera', 2, 1)],
+        )
+
     def test_calendar_event_times(self):
         ok, message, event_id = self.db.addCalendarEvent(
             'Clinic', 'Notes', '2026-03-14', '2026-03-14', '09:00', '11:00', 'demo'

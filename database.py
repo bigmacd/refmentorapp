@@ -941,9 +941,20 @@ class RefereeDbCockroach(object):
         r = self.executeSql(sql, (org_id,))
         return r.fetchall()
 
+    def _legacy_mentor_table(self) -> Optional[str]:
+        """Table that still holds pre-user mentor ids, if one is present.
+
+        Newer sessions store users.id. Older ones store the id from mentors.
+        After that table was renamed, those ids live in old_mentors.
+        """
+        for name in ('mentors', 'old_mentors'):
+            if self._tableExists(name):
+                return sql_identifier(name)
+        return None
+
     def _mentor_name_select_sql(self) -> str:
         """Mentor display columns for report queries (users and/or legacy mentors)."""
-        if self._tableExists('mentors'):
+        if self._legacy_mentor_table():
             return (
                 "COALESCE(me.last_name, m.mentor_last_name) AS mentor_last_name, "
                 "COALESCE(me.first_name, m.mentor_first_name) AS mentor_first_name"
@@ -955,15 +966,16 @@ class RefereeDbCockroach(object):
         mentor_sessions.mentor historically referenced mentors.id; newer rows use users.id.
         Join both when the legacy table exists so reports resolve either id space.
         """
-        if self._tableExists('mentors'):
+        legacy = self._legacy_mentor_table()
+        if legacy:
             return (
-                "LEFT JOIN mentors m ON ms.mentor = m.id "
+                f"LEFT JOIN {legacy} m ON ms.mentor = m.id "
                 "LEFT JOIN users me ON ms.mentor = me.id"
             )
         return "LEFT JOIN users me ON ms.mentor = me.id"
 
     def _mentor_name_match_sql(self) -> str:
-        if self._tableExists('mentors'):
+        if self._legacy_mentor_table():
             return (
                 "LOWER(COALESCE(me.first_name, m.mentor_first_name)) = %s "
                 "AND LOWER(COALESCE(me.last_name, m.mentor_last_name)) = %s"
