@@ -2,27 +2,24 @@
 
 
 # Use default filename: cockroachdb_backup.sql
-python migrate_to_local_postgres.py
+# python migrate_to_local_postgres.py
 
 # Or specify a custom filename:
-export BACKUP_FILE="my_backup_2024.sql"
-python migrate_to_local_postgres.py
-
-# Using psql or CockroachDB SQL client
-psql <your_cockroachdb_connection_string> < cockroachdb_backup.sql
-
-# Or with CockroachDB CLI:
-cockroach sql --url <connection_string> < cockroachdb_backup.sql
+#export BACKUP_FILE="my_backup_2024.sql"
+# python migrate_to_local_postgres.py
 
 
 """
 Script to migrate data from the source database (CockroachDB) to a local PostgreSQL database.
 """
 
+import json
 import os
+import uuid
 import psycopg
+from psycopg.types.json import Json
 from typing import List, Tuple, Any
-from datetime import datetime, date
+from datetime import datetime, date, time
 
 
 class DatabaseMigrator:
@@ -72,202 +69,242 @@ class DatabaseMigrator:
             if self.backup_file:
                 print(f"\nBackup file written to: {self.backup_file}")
 
+    # App tables, parents before children. Rebuilt on each run so a previous
+    # local schema (missing organization_id, rowid, and so on) cannot reject new rows.
+    # Cockroach userfile tables (userfiles_$...) are internal upload storage and are omitted.
+    TABLE_DDL = (
+        (
+            'organizations',
+            """
+            CREATE TABLE organizations (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                slug TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """,
+        ),
+        (
+            'users',
+            """
+            CREATE TABLE users (
+                id BIGSERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                last_login TIMESTAMP,
+                first_name TEXT,
+                last_name TEXT,
+                settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+                avatar_jpeg BYTEA
+            )
+            """,
+        ),
+        (
+            'user_organizations',
+            """
+            CREATE TABLE user_organizations (
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                PRIMARY KEY (user_id, organization_id)
+            )
+            """,
+        ),
+        (
+            'old_mentors',
+            """
+            CREATE TABLE old_mentors (
+                id BIGSERIAL PRIMARY KEY,
+                mentor_last_name TEXT NOT NULL,
+                mentor_first_name TEXT NOT NULL
+            )
+            """,
+        ),
+        (
+            'referees',
+            """
+            CREATE TABLE referees (
+                id BIGSERIAL PRIMARY KEY,
+                lastname TEXT NOT NULL,
+                firstname TEXT NOT NULL,
+                year_certified BIGINT,
+                organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+            )
+            """,
+        ),
+        (
+            'gamedetails',
+            """
+            CREATE TABLE gamedetails (
+                id BIGSERIAL PRIMARY KEY,
+                venue TEXT NOT NULL,
+                gameid TEXT NOT NULL,
+                center TEXT NOT NULL,
+                ar1 TEXT NOT NULL,
+                ar2 TEXT NOT NULL,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                age TEXT NOT NULL,
+                level TEXT NOT NULL,
+                organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE
+            )
+            """,
+        ),
+        (
+            'mentor_sessions',
+            """
+            CREATE TABLE mentor_sessions (
+                id BIGSERIAL PRIMARY KEY,
+                mentor BIGINT NOT NULL,
+                mentee BIGINT NOT NULL,
+                position TEXT NOT NULL,
+                date TIMESTAMP NOT NULL,
+                comments TEXT NOT NULL,
+                gameid TEXT
+            )
+            """,
+        ),
+        (
+            'risky',
+            """
+            CREATE TABLE risky (
+                id BIGSERIAL PRIMARY KEY,
+                mentee BIGINT NOT NULL,
+                mentor_session BIGINT NOT NULL,
+                date TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """,
+        ),
+        (
+            'mentor_game_selections',
+            """
+            CREATE TABLE mentor_game_selections (
+                id BIGSERIAL PRIMARY KEY,
+                mentor_id BIGINT NOT NULL REFERENCES users(id),
+                game_date TEXT NOT NULL,
+                venue TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                selected_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                UNIQUE (organization_id, mentor_id, game_date, venue, game_id)
+            )
+            """,
+        ),
+        (
+            'calendar_events',
+            """
+            CREATE TABLE calendar_events (
+                id BIGSERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                start_date DATE NOT NULL,
+                end_date DATE,
+                start_time TIME,
+                end_time TIME,
+                created_by TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+            )
+            """,
+        ),
+        (
+            'user_visits',
+            """
+            CREATE TABLE user_visits (
+                username TEXT NOT NULL,
+                role TEXT NOT NULL,
+                email TEXT NOT NULL,
+                date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                ip_address TEXT,
+                user_agent TEXT,
+                rowid BIGSERIAL PRIMARY KEY
+            )
+            """,
+        ),
+        (
+            'password_reset_tokens',
+            """
+            CREATE TABLE password_reset_tokens (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                used BOOLEAN NOT NULL DEFAULT FALSE
+            )
+            """,
+        ),
+        (
+            'logs',
+            """
+            CREATE TABLE logs (
+                timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
+                message TEXT NOT NULL,
+                rowid BIGSERIAL PRIMARY KEY
+            )
+            """,
+        ),
+        (
+            'support_inquiries',
+            """
+            CREATE TABLE support_inquiries (
+                id BIGSERIAL PRIMARY KEY,
+                email TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+        ),
+        (
+            'mentormapping',
+            """
+            CREATE TABLE mentormapping (
+                email TEXT NOT NULL,
+                name TEXT NOT NULL,
+                rowid BIGSERIAL PRIMARY KEY
+            )
+            """,
+        ),
+    )
+
     def create_schema(self):
-        """Create all tables in the target database if they don't exist."""
+        """Replace local app tables so their columns match the source database."""
         print("\nCreating schema in target database...")
+        table_names = ', '.join(name for name, _sql in reversed(self.TABLE_DDL))
+        self.target_cursor.execute(f"DROP TABLE IF EXISTS {table_names} CASCADE")
 
-        # Check and create referees table
-        self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'referees'
-        """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating referees table...")
-            self.target_cursor.execute("""
-                CREATE TABLE referees (
-                    id BIGSERIAL PRIMARY KEY,
-                    lastname TEXT NOT NULL,
-                    firstname TEXT NOT NULL,
-                    year_certified INTEGER
-                )
-            """)
+        for name, ddl in self.TABLE_DDL:
+            print(f"  Creating {name}...")
+            self.target_cursor.execute(ddl)
 
-        # Check and create mentors table
         self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'mentors'
+            CREATE UNIQUE INDEX IF NOT EXISTS gamedetails_one_per_org_game
+            ON gamedetails (organization_id, gameid)
         """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating mentors table...")
-            self.target_cursor.execute("""
-                CREATE TABLE mentors (
-                    id BIGSERIAL PRIMARY KEY,
-                    mentor_last_name TEXT NOT NULL,
-                    mentor_first_name TEXT NOT NULL
-                )
-            """)
-
-        # Check and create mentor_sessions table
         self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'mentor_sessions'
+            CREATE UNIQUE INDEX IF NOT EXISTS mentor_game_selections_one_mentor_per_game
+            ON mentor_game_selections (organization_id, game_date, venue, game_id)
         """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating mentor_sessions table...")
-            self.target_cursor.execute("""
-                CREATE TABLE mentor_sessions (
-                    id BIGSERIAL PRIMARY KEY,
-                    mentor BIGINT NOT NULL,
-                    mentee BIGINT NOT NULL,
-                    position TEXT NOT NULL,
-                    date TIMESTAMP NOT NULL,
-                    comments TEXT NOT NULL,
-                    gameid TEXT
-                )
-            """)
-
-        # Check and create risky table
-        self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'risky'
-        """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating risky table...")
-            self.target_cursor.execute("""
-                CREATE TABLE risky (
-                    id BIGSERIAL PRIMARY KEY,
-                    mentee BIGINT NOT NULL,
-                    mentor_session BIGINT NOT NULL,
-                    date TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-            """)
-        else:
-            # Check if columns have wrong type (BIGSERIAL instead of BIGINT) and fix them
-            self.target_cursor.execute("""
-                SELECT data_type, column_default
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'risky' AND column_name = 'mentee'
-            """)
-            result = self.target_cursor.fetchone()
-            # If mentee has a default (sequence), it's BIGSERIAL and needs to be fixed
-            if result and result[1] and 'nextval' in str(result[1]):
-                print("  Fixing risky table schema (mentee/mentor_session should be BIGINT, not BIGSERIAL)...")
-                self.target_cursor.execute("DROP TABLE IF EXISTS risky CASCADE")
-                self.target_cursor.execute("""
-                    CREATE TABLE risky (
-                        id BIGSERIAL PRIMARY KEY,
-                        mentee BIGINT NOT NULL,
-                        mentor_session BIGINT NOT NULL,
-                        date TIMESTAMP NOT NULL DEFAULT NOW()
-                    )
-                """)
-
-        # Check and create gamedetails table
-        self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'gamedetails'
-        """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating gamedetails table...")
-            self.target_cursor.execute("""
-                CREATE TABLE gamedetails (
-                    id BIGSERIAL PRIMARY KEY,
-                    venue TEXT NOT NULL,
-                    gameId TEXT NOT NULL,
-                    center TEXT NOT NULL,
-                    ar1 TEXT NOT NULL,
-                    ar2 TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    time TEXT NOT NULL,
-                    age TEXT NOT NULL,
-                    level TEXT NOT NULL
-                )
-            """)
-
-        # Check and create visitors table
-        self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'visitors'
-        """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating visitors table...")
-            self.target_cursor.execute("""
-                CREATE TABLE visitors (
-                    id BIGSERIAL PRIMARY KEY,
-                    email TEXT NOT NULL,
-                    date TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-            """)
-
-        # Check and create users table
-        self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'users'
-        """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating users table...")
-            self.target_cursor.execute("""
-                CREATE TABLE users (
-                    id BIGSERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    salt TEXT NOT NULL,
-                    email TEXT UNIQUE NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'user',
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    last_login TIMESTAMP
-                )
-            """)
-
-        # Check and create password_reset_tokens table
-        self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'password_reset_tokens'
-        """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating password_reset_tokens table...")
-            self.target_cursor.execute("""
-                CREATE TABLE password_reset_tokens (
-                    id BIGSERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    token TEXT UNIQUE NOT NULL,
-                    expires_at TIMESTAMP NOT NULL,
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    used BOOLEAN NOT NULL DEFAULT FALSE
-                )
-            """)
-
-        # Check and create logs table
-        self.target_cursor.execute("""
-            SELECT count(table_name) FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-            AND table_name = 'logs'
-        """)
-        if not self.target_cursor.fetchone()[0] == 1:
-            print("  Creating logs table...")
-            self.target_cursor.execute("""
-                CREATE TABLE logs (
-                    timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
-                    message TEXT NOT NULL
-                )
-            """)
 
         self.target_conn.commit()
         print("Schema creation complete.\n")
 
-    def read_table_data(self, table_name: str, noId = False) -> List[Tuple]:
+    def read_table_data(self, table_name: str, columns: List[str]) -> List[Tuple]:
         """Read all data from a source table."""
-        query = f"SELECT * FROM {table_name}"
-        if noId is False:
-            query += " ORDER BY id"
+        if 'id' in columns:
+            order_col = 'id'
+        elif 'rowid' in columns:
+            order_col = 'rowid'
+        else:
+            order_col = None
+        # Name the columns. Cockroach hides implicit rowid from SELECT *.
+        query = f"SELECT {', '.join(columns)} FROM {table_name}"
+        if order_col:
+            query += f" ORDER BY {order_col}"
         self.source_cursor.execute(query)
         return self.source_cursor.fetchall()
 
@@ -285,10 +322,10 @@ class DatabaseMigrator:
         """Format a Python value for SQL INSERT statement."""
         if value is None:
             return 'NULL'
-        elif isinstance(value, (int, float)):
-            return str(value)
         elif isinstance(value, bool):
             return 'TRUE' if value else 'FALSE'
+        elif isinstance(value, (int, float)):
+            return str(value)
         elif isinstance(value, datetime):
             # Format timestamp for SQL (CockroachDB/PostgreSQL compatible)
             # ISO format is automatically recognized
@@ -296,13 +333,30 @@ class DatabaseMigrator:
         elif isinstance(value, date):
             # Format date for SQL
             return f"'{value.isoformat()}'"
+        elif isinstance(value, time):
+            return f"'{value.isoformat()}'"
+        elif isinstance(value, memoryview):
+            return f"'\\x{bytes(value).hex()}'"
         elif isinstance(value, bytes):
             # Handle binary data (hex format for PostgreSQL/CockroachDB)
             return f"'\\x{value.hex()}'"
+        elif isinstance(value, uuid.UUID):
+            return f"'{value}'"
+        elif isinstance(value, (dict, list)):
+            escaped = json.dumps(value).replace("\\", "\\\\").replace("'", "''")
+            return f"'{escaped}'"
         else:
             # Escape single quotes and backslashes in strings
             escaped = str(value).replace("\\", "\\\\").replace("'", "''")
             return f"'{escaped}'"
+
+    def adapt_value(self, value: Any) -> Any:
+        """Adapt a source value for a psycopg parameter."""
+        if isinstance(value, memoryview):
+            return bytes(value)
+        if isinstance(value, (dict, list)):
+            return Json(value)
+        return value
 
     def write_backup_insert(self, table_name: str, columns: List[str], row: Tuple):
         """Write an INSERT statement to the backup file."""
@@ -323,10 +377,6 @@ class DatabaseMigrator:
             preserve_ids: If True, preserve original IDs (requires temporarily disabling constraints)
         """
         print(f"Migrating {table_name}...")
-        if table_name == 'logs':
-            if self.backup_fp:
-                self.backup_fp.write(f"\n-- Table: {table_name} (skipped - not needed)\n")
-            return
 
         try:
             # Get column names
@@ -335,10 +385,7 @@ class DatabaseMigrator:
             placeholders = ', '.join(['%s'] * len(columns))
 
             # Read data from source
-            if table_name == "logs":
-                data = self.read_table_data(table_name, True)
-            else:
-                data = self.read_table_data(table_name)
+            data = self.read_table_data(table_name, columns)
 
             if not data:
                 print(f"  No data to migrate in {table_name}")
@@ -355,32 +402,36 @@ class DatabaseMigrator:
                 if preserve_ids and 'id' in columns:
                     self.backup_fp.write("-- Note: This table preserves IDs\n")
 
-            if preserve_ids and 'id' in columns:
+            pk_column = 'id' if 'id' in columns else 'rowid' if 'rowid' in columns else None
+            if preserve_ids and pk_column:
                 # Preserve IDs by inserting with explicit ID values
                 # Need to reset the sequence after inserting
                 insert_sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
 
                 # Insert data with IDs
                 for row in data:
-                    self.target_cursor.execute(insert_sql, row)
+                    self.target_cursor.execute(insert_sql, [self.adapt_value(value) for value in row])
                     # Write to backup file
                     self.write_backup_insert(table_name, columns, row)
 
-                # Reset the sequence to the max ID
-                id_index = columns.index('id')
-                max_id = max(row[id_index] for row in data if row[id_index] is not None)
+                # Reset the sequence to the max ID. Cockroach unique_rowid() values are
+                # larger than a serial sequence, so the local BIGSERIAL must be moved forward.
+                pk_index = columns.index(pk_column)
+                max_id = max(row[pk_index] for row in data if row[pk_index] is not None)
                 if max_id:
-                    self.target_cursor.execute(f"SELECT setval('{table_name}_id_seq', {max_id}, true)")
-                    # Write sequence reset to backup file
-                    if self.backup_fp:
+                    self.target_cursor.execute(
+                        f"SELECT setval('{table_name}_{pk_column}_seq', {max_id}, true)"
+                    )
+                    # Source id columns use unique_rowid(), which has no sequence to reset.
+                    if self.backup_fp and pk_column == 'id':
                         self.backup_fp.write(f"SELECT setval('{table_name}_id_seq', {max_id}, true);\n")
 
                 print(f"  Migrated {len(data)} rows (preserving IDs)")
             else:
-                # Insert without preserving IDs (for tables without id or logs table)
+                # Insert without preserving IDs (composite keys such as user_organizations)
                 insert_sql = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders})"
                 for row in data:
-                    self.target_cursor.execute(insert_sql, row)
+                    self.target_cursor.execute(insert_sql, [self.adapt_value(value) for value in row])
                     # Write to backup file
                     self.write_backup_insert(table_name, columns, row)
                 print(f"  Migrated {len(data)} rows")
@@ -396,23 +447,9 @@ class DatabaseMigrator:
         """Migrate all tables in the correct order to preserve foreign key relationships."""
         print("\nStarting data migration...\n")
 
-        # Migrate tables in order, respecting foreign key dependencies
-        # Tables with no dependencies first
-        self.migrate_table('referees')
-        self.migrate_table('mentors')
-        self.migrate_table('gamedetails')
-        self.migrate_table('visitors')
-        self.migrate_table('users')
-
-        # Tables that depend on referees and mentors
-        self.migrate_table('mentor_sessions')
-        self.migrate_table('risky')
-
-        # Tables that depend on users
-        self.migrate_table('password_reset_tokens')
-
-        # Logs table (no dependencies)
-        self.migrate_table('logs', preserve_ids=False)  # logs doesn't have an id column
+        # Parents before children so foreign keys are satisfied.
+        for table_name, _ddl in self.TABLE_DDL:
+            self.migrate_table(table_name)
 
         print("\nMigration complete!")
 
