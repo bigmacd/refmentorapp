@@ -4,7 +4,7 @@ import logging
 import os
 
 
-credFile = json.loads(os.environ.get('GOOGLE_CREDENTIALS_FILE'))
+credFile = json.loads(os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON'))
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
