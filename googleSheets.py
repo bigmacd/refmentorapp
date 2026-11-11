@@ -1,10 +1,10 @@
 import datetime
+import json
 import logging
+import os
 
 
-# refmentoring-530@psyched-runner-378322.iam.gserviceaccount.com
-credFile = 'psyched-runner-378322-6ea04e89b69e.json'
-
+credFile = json.loads(os.environ.get('GOOGLE_CREDENTIALS_FILE'))
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -57,7 +57,7 @@ def _getThisYearsNewRefs(allRefs: list) -> list:
 
 def getRefsFromGoogleSignupSheet() -> list:
 
-    creds = ServiceAccountCredentials.from_json_keyfile_name(credFile)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credFile, scope)
     client = gspread.authorize(creds)
 
     spreadsheet = client.open('Referee Certification and Eligibility (Responses)')
