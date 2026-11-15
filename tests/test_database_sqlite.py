@@ -253,3 +253,13 @@ class TestRefereeDbSqlite(unittest.TestCase):
         self.assertIsNone(self.db.getUserByUsername("admin' OR '1'='1"))
         with self.assertRaises(ValueError):
             self.db.getMentoringSessionDetails("2026 OR 1=1 --", org_id)
+
+    def test_update_user_role_accepts_reports(self):
+        self.db.createUser('boss', 'h', 's', 'boss@example.com', 'user', 'pat', 'boss')
+        user = self.db.getUserByUsername('boss')
+        ok, message = self.db.updateUserRole(user['id'], 'reports')
+        self.assertTrue(ok, message)
+        self.assertEqual(self.db.getUserById(user['id'])['role'], 'reports')
+        ok, message = self.db.updateUserRole(user['id'], 'owner')
+        self.assertFalse(ok)
+        self.assertIn('reports', message)

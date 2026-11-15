@@ -19,6 +19,8 @@ from year_end_summary import (
 
 _SQL_IDENTIFIER_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 
+USER_ROLES = ('user', 'admin', 'reports')
+
 
 def _parse_user_settings(value: Any) -> dict:
     if isinstance(value, dict):
@@ -1691,8 +1693,8 @@ class RefereeDbCockroach(object):
             return (False, f'Failed to remove user from organization: {ex}')
 
     def updateUserRole(self, user_id: int, role: str) -> Tuple[bool, str]:
-        if role not in ('user', 'admin'):
-            return (False, 'Role must be user or admin')
+        if role not in USER_ROLES:
+            return (False, 'Role must be user, admin, or reports')
         try:
             sql = "UPDATE users SET role = %s WHERE id = %s"
             self.executeSql(sql, (role, user_id))

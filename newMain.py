@@ -860,37 +860,52 @@ def app_page():
     </style>
     ''')
 
-    # Tab navigation using NiceGUI tabs
+    # A reports user gets the Generate tab only. Match data above still loads
+    # so week reports can list the organization's dates.
+    reports_only = state.auth_manager.is_reports_user()
+
     with ui.tabs().classes('w-full') as tabs:
-        tab_report = ui.tab('📥 Report', 'Enter a Mentor Report')
+        tab_report = None
+        tab_workload = None
+        tab_select_games = None
+        tab_calendar = None
+        if not reports_only:
+            tab_report = ui.tab('📥 Report', 'Enter a Mentor Report')
         tab_generate = ui.tab('📤 Generate', 'Generate Reports')
-        tab_workload = ui.tab('📝 Workload', 'See Current Workload')
-        tab_select_games = ui.tab('🎯 Select Games', 'Select Games to Mentor')
-        tab_calendar = ui.tab('🗓 Calendar', 'Calendar')
+        if not reports_only:
+            tab_workload = ui.tab('📝 Workload', 'See Current Workload')
+            tab_select_games = ui.tab('🎯 Select Games', 'Select Games to Mentor')
+            tab_calendar = ui.tab('🗓 Calendar', 'Calendar')
 
-    # Content container
-    content = ui.tab_panels(tabs, value=tab_report).classes('w-full')
+    content = ui.tab_panels(
+        tabs,
+        value=tab_generate if reports_only else tab_report,
+    ).classes('w-full')
 
-    # Initialize tab components
-    calendar_tab = CalendarTab(state.db, state.auth_manager, logger)
-    game_selection_tab = MentorGameSelection(
-        state.db, state.auth_manager, state.all_match_data, state.dates, logger,
-        get_match_data=lambda: (state.all_match_data, state.dates),
-        ensure_match_data=lambda: state.load_data(organization_id=current_org_id()),
-        ensure_workload=lambda: state.load_workload_data(organization_id=current_org_id()),
-    )
+    if not reports_only:
+        calendar_tab = CalendarTab(state.db, state.auth_manager, logger)
+        game_selection_tab = MentorGameSelection(
+            state.db, state.auth_manager, state.all_match_data, state.dates, logger,
+            get_match_data=lambda: (state.all_match_data, state.dates),
+            ensure_match_data=lambda: state.load_data(organization_id=current_org_id()),
+            ensure_workload=lambda: state.load_workload_data(organization_id=current_org_id()),
+        )
 
     with content:
-        with ui.tab_panel(tab_report):
-            render_mentor_report_tab()
+        if tab_report is not None:
+            with ui.tab_panel(tab_report):
+                render_mentor_report_tab()
         with ui.tab_panel(tab_generate):
             render_reports_tab()
-        with ui.tab_panel(tab_workload):
-            render_workload_tab()
-        with ui.tab_panel(tab_select_games):
-            game_selection_tab.render()
-        with ui.tab_panel(tab_calendar):
-            calendar_tab.render()
+        if tab_workload is not None:
+            with ui.tab_panel(tab_workload):
+                render_workload_tab()
+        if tab_select_games is not None:
+            with ui.tab_panel(tab_select_games):
+                game_selection_tab.render()
+        if tab_calendar is not None:
+            with ui.tab_panel(tab_calendar):
+                calendar_tab.render()
 
 
 def render_mentor_report_tab():

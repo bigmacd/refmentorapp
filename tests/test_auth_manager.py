@@ -242,6 +242,27 @@ class TestAuthManagerPasswordReset(unittest.TestCase):
         self.auth_manager.db.getMentorDisplayNameForUser.return_value = 'David Helfgott'
         self.assertEqual(self.auth_manager.get_current_mentor_display_name(), 'David Helfgott')
 
+    def test_create_user_rejects_unknown_role(self):
+        success, message = self.auth_manager.create_user(
+            'boss',
+            'Password1!',
+            'boss@example.com',
+            role='owner',
+            organization_id=1,
+            first_name='Pat',
+            last_name='Boss',
+        )
+        self.assertFalse(success)
+        self.assertIn('reports', message)
+        self.auth_manager.db.getOrganizationById.assert_not_called()
+
+    def test_is_reports_user_reads_session_role(self):
+        self.auth_manager._storage_get = Mock(return_value='reports')
+        self.assertTrue(self.auth_manager.is_reports_user())
+        self.auth_manager._storage_get = Mock(return_value='user')
+        self.assertFalse(self.auth_manager.is_reports_user())
+        self.assertFalse(self.auth_manager.is_admin())
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -62,6 +62,8 @@ In that menu:
 
 The app home has five tabs. On a phone they sit in a tight row; swipe sideways if one is off-screen.
 
+A **Reports** account is the exception. After signing in, that person sees only the **Generate** tab and can run any of the existing reports for the organization they chose at login. They do not get Report, Workload, Select Games, or Calendar.
+
 | Tab | What it is for |
 |-----|----------------|
 | **Report** | Enter a mentoring session |
@@ -181,7 +183,7 @@ Need an account, a name change, or access to another organization? Ask an admini
 
 Admins have the same mentor tools, plus an **Admin** section in the avatar menu:
 
-- **User Management** — create users, set role (`user` or `admin`), add/remove organization membership
+- **User Management** — create users, set role (`user`, `admin`, or `reports`), add/remove organization membership. Use **reports** for someone who should only generate and download reports for their organization.
 - **User Activity** — last login and login history for an organization
 - **Organizations** — create or delete organizations
 

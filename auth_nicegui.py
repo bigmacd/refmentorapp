@@ -26,7 +26,7 @@ from avatars import (
     has_avatar,
     save_avatar,
 )
-from database import RefereeDbCockroach, get_db
+from database import USER_ROLES, RefereeDbCockroach, get_db
 from sendemail import SendMailSimple
 
 # Password validation schema
@@ -41,6 +41,10 @@ RESET_REQUEST_SUCCESS_MESSAGE = (
 PASSWORD_RESET_TOKEN_TTL = timedelta(minutes=15)
 APP_HOME = '/app'
 HELP_PATH = '/help'
+USER_ROLE_OPTIONS = {
+    role: 'Reports' if role == 'reports' else role
+    for role in USER_ROLES
+}
 DARK_MODE_STORAGE_KEY = 'dark_mode'
 DEFAULT_DARK_MODE = True
 _USER_GUIDE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'docs', 'user-guide.md')
@@ -202,6 +206,10 @@ class AuthManager:
         """Check if current user is an admin"""
         return self._storage_get('user_role') == 'admin'
 
+    def is_reports_user(self) -> bool:
+        """Check if the current user only generates reports."""
+        return self._storage_get('user_role') == 'reports'
+
     def create_user(
         self,
         username: str,
@@ -213,6 +221,9 @@ class AuthManager:
         last_name: str = None,
     ) -> Tuple[bool, str]:
         """Create a new user account and associate with an organization."""
+        if role not in USER_ROLES:
+            return False, "Role must be user, admin, or reports"
+
         if organization_id is None:
             return False, "Organization is required"
 
@@ -1251,7 +1262,7 @@ def user_management_page():
                 new_email = ui.input('Email').classes('w-full')
                 new_password = ui.input('Password', password=True).classes('w-full')
                 confirm_password = ui.input('Confirm Password', password=True).classes('w-full')
-                new_role = ui.select(['user', 'admin'], value='user', label='Role').classes('w-full')
+                new_role = ui.select(USER_ROLE_OPTIONS, value='user', label='Role').classes('w-full')
 
                 orgs = auth_manager.get_organizations()
                 org_options = {o['id']: o['name'] for o in orgs}
@@ -1352,7 +1363,7 @@ def user_management_page():
                         membership_area = ui.column().classes('w-full mb-4')
 
                         role_select = ui.select(
-                            ['user', 'admin'],
+                            USER_ROLE_OPTIONS,
                             value=user['role'],
                             label='Role',
                         ).classes('w-full mb-4')
@@ -1484,7 +1495,7 @@ def user_management_page():
                         with ui.row().classes('w-full font-bold text-sm text-gray-400 px-2 pb-2'):
                             ui.label('Username').classes('flex-1')
                             ui.label('Email').classes('flex-[2]')
-                            ui.label('Role').classes('w-20')
+                            ui.label('Role').classes('w-24')
                             ui.label('').classes('w-40')
 
                         for user in users:
@@ -1493,7 +1504,7 @@ def user_management_page():
                             ):
                                 ui.label(user['username']).classes('flex-1')
                                 ui.label(user['email']).classes('flex-[2] text-gray-300')
-                                ui.label(user['role']).classes('w-20')
+                                ui.label(user['role']).classes('w-24')
                                 with ui.row().classes('w-40 gap-1 justify-end'):
                                     ui.button(
                                         'Edit',
